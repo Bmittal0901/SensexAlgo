@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sensex Algo</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0a0e1a;color:#e0e0e0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+    .screen{display:none;min-height:100vh}
+    .screen.active{display:flex}
+
+    /* SCREEN 1 */
+    #screen1{align-items:center;justify-content:center;padding:40px 20px}
+    .setup-card{background:#0d1224;border:1px solid #1e2a45;border-radius:16px;padding:40px;width:100%;max-width:460px}
+    .logo{text-align:center;margin-bottom:30px}
+    .logo h1{font-size:22px;color:#4fc3f7;letter-spacing:2px}
+    .logo p{font-size:12px;color:#607d8b;margin-top:5px}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+    .form-grid .full{grid-column:1/3}
+    .form-group{display:flex;flex-direction:column;gap:6px}
+    .form-group label{font-size:11px;color:#607d8b;text-transform:uppercase;letter-spacing:.5px}
+    .form-group input,.form-group select{background:#111827;border:1px solid #1e2a45;border-radius:8px;color:#e0e0e0;padding:10px 14px;font-size:14px;outline:none;transition:border .2s;width:100%}
+    .form-group input:focus,.form-group select:focus{border-color:#4fc3f7}
+    .form-group select option{background:#111827}
+    .error-msg{font-size:12px;color:#f44336;min-height:18px;margin-bottom:8px}
+    .btn-next{width:100%;padding:14px;background:linear-gradient(135deg,#00c853,#00897b);border:none;border-radius:10px;color:#000;font-size:15px;font-weight:700;letter-spacing:2px;cursor:pointer;transition:opacity .2s,transform .1s}
+    .btn-next:hover{opacity:.9}
+    .btn-next:active{transform:scale(.98)}
+    .btn-next:disabled{opacity:.4;cursor:not-allowed}
+
+    /* SCREEN 2 */
+    #screen2{flex-direction:column}
+    .navbar{background:#0d1224;border-bottom:1px solid #1e2a45;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+    .navbar-left{display:flex;align-items:center;gap:14px}
+    .back-btn{background:none;border:1px solid #1e2a45;color:#607d8b;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .2s}
+    .back-btn:hover{border-color:#4fc3f7;color:#4fc3f7}
+    .navbar h1{font-size:17px;color:#4fc3f7;letter-spacing:1px}
+    .clock{font-size:13px;color:#607d8b;font-family:monospace}
+    .dashboard{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto 1fr;gap:14px;padding:18px;flex:1;overflow:hidden}
+    .status-bar{grid-column:1/3;background:#0d1224;border:1px solid #1e2a45;border-radius:10px;padding:14px 22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+    .status-indicator{display:flex;align-items:center;gap:8px}
+    .dot{width:12px;height:12px;border-radius:50%;background:#f44336;flex-shrink:0}
+    .dot.running{background:#00c853;box-shadow:0 0 8px #00c853;animation:pulse 1.5s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .status-text{font-size:13px;font-weight:700;letter-spacing:1px;color:#f44336}
+    .status-text.running{color:#00c853}
+    .meta-item{font-size:12px;color:#607d8b}
+    .meta-item span{color:#e0e0e0;margin-left:4px}
+    .pnl-block{margin-left:auto;text-align:right}
+    .pnl-label{font-size:10px;color:#607d8b;text-transform:uppercase}
+    .pnl-value{font-size:24px;font-weight:700;font-family:monospace;color:#607d8b}
+    .pnl-value.positive{color:#00c853}
+    .pnl-value.negative{color:#f44336}
+    .stop-btn{background:#f44336;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .2s}
+    .stop-btn:hover{opacity:.85}
+    .stop-btn:disabled{opacity:.4;cursor:not-allowed}
+    .card{background:#0d1224;border:1px solid #1e2a45;border-radius:10px;padding:20px}
+    .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+    .card-title{font-size:12px;color:#607d8b;text-transform:uppercase;letter-spacing:1px}
+    .card-badge{font-size:10px;font-weight:700;padding:3px 10px;border-radius:4px;background:#1e2a45;color:#607d8b}
+    .card-badge.active{background:rgba(0,200,83,.15);color:#00c853}
+    .card-symbol{font-size:15px;font-weight:600;color:#e0e0e0;margin-bottom:14px;font-family:monospace}
+    .card-symbol.empty{color:#1e2a45}
+    .card-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #111827}
+    .card-row:last-child{border-bottom:none}
+    .card-row .lbl{font-size:11px;color:#607d8b}
+    .card-row .val{font-size:13px;font-family:monospace;color:#607d8b}
+    .card-row .val.active{color:#e0e0e0}
+    .card-row .val.profit{color:#00c853}
+    .card-row .val.loss{color:#f44336}
+    .log-panel{grid-column:1/3;background:#0d1224;border:1px solid #1e2a45;border-radius:10px;padding:16px;display:flex;flex-direction:column;overflow:hidden}
+    .log-panel h3{font-size:11px;color:#607d8b;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:1px solid #1e2a45;padding-bottom:8px}
+    .log-box{flex:1;overflow-y:auto;font-family:'Courier New',monospace;font-size:12px;line-height:1.8;background:#060a14;border-radius:6px;padding:10px 14px;min-height:140px;max-height:200px}
+    .log-box::-webkit-scrollbar{width:4px}
+    .log-box::-webkit-scrollbar-thumb{background:#1e2a45;border-radius:4px}
+    .log-line{display:block}
+    .log-line.buy{color:#00c853}
+    .log-line.target{color:#69f0ae;font-weight:bold}
+    .log-line.sl{color:#f44336}
+    .log-line.eod{color:#ffb300}
+    .log-line.error{color:#f44336}
+    .log-line.default{color:#546e7a}
+    .log-empty{color:#1e2a45;font-size:12px;display:block;text-align:center;margin-top:16px}
+    .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(0,0,0,.3);border-top-color:#000;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+
+<!-- SCREEN 1 — SETUP -->
+<div id="screen1" class="screen active">
+  <div class="setup-card">
+    <div class="logo">
+      <h1>SENSEX ALGO</h1>
+      <p>EMA Crossover Strategy — BFO Options</p>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>CE Strike</label>
+        <input type="number" id="call_strike" placeholder="e.g. 82700"/>
+      </div>
+      <div class="form-group">
+        <label>PE Strike</label>
+        <input type="number" id="put_strike" placeholder="e.g. 82400"/>
+      </div>
+      <div class="form-group">
+        <label>Number of Lots</label>
+        <input type="number" id="lots" value="1" min="1"/>
+      </div>
+      <div class="form-group">
+        <label>Timeframe</label>
+        <select id="timeframe">
+          <option value="3m">3 Minutes</option>
+          <option value="5m" selected>5 Minutes</option>
+          <option value="15m">15 Minutes</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Profit Points</label>
+        <input type="number" id="profit_points" value="30" min="1"/>
+      </div>
+      <div class="form-group">
+        <label>Stoploss Points</label>
+        <input type="number" id="stoploss_points" value="30" min="1"/>
+      </div>
+    </div>
+    <div class="error-msg" id="errorMsg"></div>
+    <button class="btn-next" id="startBtn" onclick="handleStart()">START ALGO</button>
+  </div>
+</div>
+
+<!-- SCREEN 2 — DASHBOARD -->
+<div id="screen2" class="screen">
+  <div class="navbar">
+    <div class="navbar-left">
+      <button class="back-btn" onclick="goBack()">&#8592; Back</button>
+      <h1>LIVE DASHBOARD</h1>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+  <div class="dashboard">
+    <div class="status-bar">
+      <div class="status-indicator">
+        <div class="dot" id="statusDot"></div>
+        <div class="status-text" id="statusText">STARTING...</div>
+      </div>
+      <div class="meta-item">Expiry: <span id="expiryVal">--</span></div>
+      <div class="meta-item">Qty: <span id="qtyVal">--</span></div>
+      <div class="meta-item">TP: <span id="tpVal">--</span> pts</div>
+      <div class="meta-item">SL: <span id="slVal">--</span> pts</div>
+      <div class="pnl-block">
+        <div class="pnl-label">Total PnL</div>
+        <div class="pnl-value" id="pnlVal">Rs. 0.00</div>
+      </div>
+      <button class="stop-btn" id="stopBtn" onclick="stopAlgo()">STOP</button>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">CE LEG</div>
+        <div class="card-badge" id="ceBadge">WAITING</div>
+      </div>
+      <div class="card-symbol empty" id="ceSymbol">No Position</div>
+      <div class="card-row"><span class="lbl">Entry Price</span><span class="val" id="ceEntry">--</span></div>
+      <div class="card-row"><span class="lbl">Target</span><span class="val" id="ceTarget">--</span></div>
+      <div class="card-row"><span class="lbl">Stoploss</span><span class="val" id="ceSL">--</span></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">PE LEG</div>
+        <div class="card-badge" id="peBadge">WAITING</div>
+      </div>
+      <div class="card-symbol empty" id="peSymbol">No Position</div>
+      <div class="card-row"><span class="lbl">Entry Price</span><span class="val" id="peEntry">--</span></div>
+      <div class="card-row"><span class="lbl">Target</span><span class="val" id="peTarget">--</span></div>
+      <div class="card-row"><span class="lbl">Stoploss</span><span class="val" id="peSL">--</span></div>
+    </div>
+    <div class="log-panel">
+      <h3>Live Logs</h3>
+      <div class="log-box" id="logBox">
+        <span class="log-empty">Connecting to algo...</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = "https://web-production-33f0d.up.railway.app"; // Replace with Railway URL when deployed
+  let pollInterval = null;
+  let lastLogCount = 0;
+
+  function updateClock() {
+    document.getElementById("clock").textContent =
+      new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  function showScreen(n) {
+    document.getElementById("screen1").classList.remove("active");
+    document.getElementById("screen2").classList.remove("active");
+    document.getElementById("screen"+n).classList.add("active");
+  }
+
+  async function goBack() {
+    if (confirm("Going back will STOP the algo. Continue?")) {
+      await stopAlgo();
+      clearInterval(pollInterval);
+      showScreen(1);
+      const btn = document.getElementById("startBtn");
+      btn.disabled = false;
+      btn.innerHTML = "START ALGO";
+    }
+  }
+
+  async function handleStart() {
+    const btn = document.getElementById("startBtn");
+    const err = document.getElementById("errorMsg");
+    err.textContent = "";
+
+    const config = {
+      call_strike:     parseInt(document.getElementById("call_strike").value),
+      put_strike:      parseInt(document.getElementById("put_strike").value),
+      lots:            parseInt(document.getElementById("lots").value),
+      profit_points:   parseInt(document.getElementById("profit_points").value),
+      stoploss_points: parseInt(document.getElementById("stoploss_points").value),
+      timeframe:       document.getElementById("timeframe").value,
+    };
+
+    if (!config.call_strike)        { err.textContent = "CE strike is required."; return; }
+    if (!config.put_strike)         { err.textContent = "PE strike is required."; return; }
+    if (config.lots < 1)            { err.textContent = "Lots must be at least 1."; return; }
+    if (config.profit_points < 1)   { err.textContent = "Profit points must be positive."; return; }
+    if (config.stoploss_points < 1) { err.textContent = "Stoploss points must be positive."; return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> STARTING...';
+
+    try {
+      const res = await fetch(`${API}/start`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.status === "started" || data.status === "already running") {
+        showScreen(2);
+        lastLogCount = 0;
+        startPolling();
+      } else {
+        err.textContent = "Failed to start: " + JSON.stringify(data);
+        btn.disabled = false;
+        btn.innerHTML = "START ALGO";
+      }
+    } catch(e) {
+      err.textContent = "Cannot connect to backend. Is the server running?";
+      btn.disabled = false;
+      btn.innerHTML = "START ALGO";
+    }
+  }
+
+  async function stopAlgo() {
+    try {
+      await fetch(`${API}/stop`, {method:"POST"});
+      document.getElementById("stopBtn").disabled = true;
+    } catch(e) {}
+  }
+
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(fetchStatus, 3000);
+    fetchStatus();
+  }
+
+  async function fetchStatus() {
+    try {
+      const res = await fetch(`${API}/status`);
+      const data = await res.json();
+      updateDashboard(data);
+    } catch(e) { console.log("Poll error:", e); }
+  }
+
+  function updateDashboard(data) {
+    const dot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const stopBtn = document.getElementById("stopBtn");
+
+    if (data.running) {
+      dot.classList.add("running");
+      statusText.textContent = "RUNNING";
+      statusText.classList.add("running");
+      stopBtn.disabled = false;
+    } else {
+      dot.classList.remove("running");
+      statusText.textContent = "STOPPED";
+      statusText.classList.remove("running");
+      stopBtn.disabled = true;
+    }
+
+    document.getElementById("expiryVal").textContent = data.expiry || "--";
+    document.getElementById("qtyVal").textContent    = data.qty || "--";
+    document.getElementById("tpVal").textContent     = data.profit_points || "--";
+    document.getElementById("slVal").textContent     = data.stoploss_points || "--";
+
+    const pnlEl = document.getElementById("pnlVal");
+    const pnl   = data.pnl || 0;
+    pnlEl.textContent = "Rs. " + pnl.toLocaleString("en-IN",{minimumFractionDigits:2});
+    pnlEl.className   = "pnl-value"+(pnl>0?" positive":pnl<0?" negative":"");
+
+    updateCard("ce", data.call_entry, data.call_symbol, data.profit_points, data.stoploss_points);
+    updateCard("pe", data.put_entry,  data.put_symbol,  data.profit_points, data.stoploss_points);
+
+    const logs = data.logs || [];
+    if (logs.length !== lastLogCount) {
+      lastLogCount = logs.length;
+      const logBox = document.getElementById("logBox");
+      if (logs.length === 0) {
+        logBox.innerHTML = '<span class="log-empty">No logs yet...</span>';
+      } else {
+        logBox.innerHTML = logs.map(line => {
+          let cls = "default";
+          if      (line.includes("[BUY"))            cls = "buy";
+          else if (line.includes("SELL - TARGET"))   cls = "target";
+          else if (line.includes("SELL - STOPLOSS")) cls = "sl";
+          else if (line.includes("SELL - EOD"))      cls = "eod";
+          else if (line.includes("Error"))           cls = "error";
+          return `<span class="log-line ${cls}">${line}</span>`;
+        }).join("\n");
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+    }
+  }
+
+  function updateCard(leg, entry, symbol, tp, sl) {
+    const symEl    = document.getElementById(leg+"Symbol");
+    const badge    = document.getElementById(leg+"Badge");
+    const entryEl  = document.getElementById(leg+"Entry");
+    const targetEl = document.getElementById(leg+"Target");
+    const slEl     = document.getElementById(leg+"SL");
+
+    if (entry !== null && entry !== undefined) {
+      symEl.textContent    = symbol || "--";
+      symEl.className      = "card-symbol";
+      badge.textContent    = "IN TRADE";
+      badge.className      = "card-badge active";
+      entryEl.textContent  = "Rs. "+entry;
+      entryEl.className    = "val active";
+      targetEl.textContent = "Rs. "+(entry+(tp||0)).toFixed(2);
+      targetEl.className   = "val profit";
+      slEl.textContent     = "Rs. "+(entry-(sl||0)).toFixed(2);
+      slEl.className       = "val loss";
+    } else {
+      symEl.textContent    = symbol || "No Position";
+      symEl.className      = "card-symbol empty";
+      badge.textContent    = "WAITING";
+      badge.className      = "card-badge";
+      entryEl.textContent  = "--";
+      entryEl.className    = "val";
+      targetEl.textContent = "--";
+      targetEl.className   = "val";
+      slEl.textContent     = "--";
+      slEl.className       = "val";
+    }
+  }
+</script>
+</body>
+</html>

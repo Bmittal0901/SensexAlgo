@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+kiteconnect
+pandas
+pytz
+python-dotenv
+pyotp
+requests
+schedule
