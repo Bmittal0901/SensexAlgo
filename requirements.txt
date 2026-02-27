@@ -7,3 +7,4 @@ python-dotenv
 pyotp
 requests
 schedule
+pydantic
