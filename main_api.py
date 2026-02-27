@@ -101,21 +101,17 @@ def run_algo(config: AlgoConfig):
 
     try:
         kite = get_kite()
-        log(f"Logged in as: {kite.profile()['user_name']}")
     except Exception as e:
-        log(f"Login failed: {e}")
+        log(f"[ERROR] Login failed: {e}")
         algo_state["running"] = False
         return
-
-    mode = "DRY RUN" if config.dry_run else "LIVE"
-    log(f"Mode: {mode} | Lots: {config.lots} | TP: {config.profit_points} | SL: {config.stoploss_points}")
 
     try:
         CALL_SYMBOL, PUT_SYMBOL, CE_TOKEN, PE_TOKEN, EXPIRY = resolve_ce_pe_by_strikes(
             kite, config.call_strike, config.put_strike
         )
     except Exception as e:
-        log(f"Failed to resolve contracts: {e}")
+        log(f"[ERROR] Failed to resolve contracts: {e}")
         algo_state["running"] = False
         return
 
@@ -126,11 +122,8 @@ def run_algo(config: AlgoConfig):
     algo_state["stoploss_points"] = config.stoploss_points
     algo_state["expiry"]          = str(EXPIRY)
 
-    log(f"CE: {CALL_SYMBOL} | PE: {PUT_SYMBOL} | Expiry: {EXPIRY} | Qty: {QTY}")
-
     init_candles = get_candles_zk(kite, CE_TOKEN, ZK_TF)
     last_seen_candle_time = pd.DataFrame(init_candles).iloc[-1]["date"] if init_candles else None
-    log(f"Startup candle time: {last_seen_candle_time}")
 
     call_entry = None
     put_entry  = None
@@ -138,7 +131,6 @@ def run_algo(config: AlgoConfig):
     while not stop_flag.is_set():
         try:
             if not is_market_open():
-                log("Market closed. Sleeping 60s...")
                 time.sleep(60)
                 continue
 
@@ -146,7 +138,6 @@ def run_algo(config: AlgoConfig):
             pe_candles = get_candles_zk(kite, PE_TOKEN, ZK_TF)
 
             if not ce_candles or not pe_candles:
-                log("No candle data yet. Waiting...")
                 time.sleep(60)
                 continue
 
@@ -168,13 +159,13 @@ def run_algo(config: AlgoConfig):
                 place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_BUY)
                 call_entry = ce_df.iloc[-2]["close"]
                 algo_state["call_entry"] = call_entry
-                log(f"[BUY - CE] {CALL_SYMBOL} | Qty: {QTY} | Price: Rs.{call_entry}")
+                log(f"[BUY - CE] {CALL_SYMBOL} | Qty: {QTY} | Price: ₹{call_entry}")
 
             if pe_signal and put_entry is None:
                 place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_BUY)
                 put_entry = pe_df.iloc[-2]["close"]
                 algo_state["put_entry"] = put_entry
-                log(f"[BUY - PE] {PUT_SYMBOL} | Qty: {QTY} | Price: Rs.{put_entry}")
+                log(f"[BUY - PE] {PUT_SYMBOL} | Qty: {QTY} | Price: ₹{put_entry}")
 
             while not stop_flag.is_set():
                 if not is_market_open():
@@ -186,7 +177,7 @@ def run_algo(config: AlgoConfig):
                         place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
                         pnl = (eod_ltp - call_entry) * QTY
                         algo_state["pnl"] += pnl
-                        log(f"[SELL - EOD] {CALL_SYMBOL} | Price: Rs.{eod_ltp} | PnL: Rs.{pnl:.2f}")
+                        log(f"[SELL - EOD] {CALL_SYMBOL} | Price: ₹{eod_ltp} | PnL: ₹{pnl:.2f}")
                         call_entry = None
                         algo_state["call_entry"] = None
                     if put_entry is not None:
@@ -194,7 +185,7 @@ def run_algo(config: AlgoConfig):
                         place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
                         pnl = (eod_ltp - put_entry) * QTY
                         algo_state["pnl"] += pnl
-                        log(f"[SELL - EOD] {PUT_SYMBOL} | Price: Rs.{eod_ltp} | PnL: Rs.{pnl:.2f}")
+                        log(f"[SELL - EOD] {PUT_SYMBOL} | Price: ₹{eod_ltp} | PnL: ₹{pnl:.2f}")
                         put_entry = None
                         algo_state["put_entry"] = None
                     break
@@ -205,14 +196,14 @@ def run_algo(config: AlgoConfig):
                         place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
                         pnl = (call_ltp - call_entry) * QTY
                         algo_state["pnl"] += pnl
-                        log(f"[SELL - TARGET] {CALL_SYMBOL} | Price: Rs.{call_ltp} | PnL: Rs.{pnl:.2f}")
+                        log(f"[SELL - TARGET] {CALL_SYMBOL} | Price: ₹{call_ltp} | PnL: ₹{pnl:.2f}")
                         call_entry = None
                         algo_state["call_entry"] = None
                     elif call_ltp <= call_entry - config.stoploss_points:
                         place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
                         pnl = (call_ltp - call_entry) * QTY
                         algo_state["pnl"] += pnl
-                        log(f"[SELL - STOPLOSS] {CALL_SYMBOL} | Price: Rs.{call_ltp} | PnL: Rs.{pnl:.2f}")
+                        log(f"[SELL - STOPLOSS] {CALL_SYMBOL} | Price: ₹{call_ltp} | PnL: ₹{pnl:.2f}")
                         call_entry = None
                         algo_state["call_entry"] = None
 
@@ -222,14 +213,14 @@ def run_algo(config: AlgoConfig):
                         place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
                         pnl = (put_ltp - put_entry) * QTY
                         algo_state["pnl"] += pnl
-                        log(f"[SELL - TARGET] {PUT_SYMBOL} | Price: Rs.{put_ltp} | PnL: Rs.{pnl:.2f}")
+                        log(f"[SELL - TARGET] {PUT_SYMBOL} | Price: ₹{put_ltp} | PnL: ₹{pnl:.2f}")
                         put_entry = None
                         algo_state["put_entry"] = None
                     elif put_ltp <= put_entry - config.stoploss_points:
                         place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
                         pnl = (put_ltp - put_entry) * QTY
                         algo_state["pnl"] += pnl
-                        log(f"[SELL - STOPLOSS] {PUT_SYMBOL} | Price: Rs.{put_ltp} | PnL: Rs.{pnl:.2f}")
+                        log(f"[SELL - STOPLOSS] {PUT_SYMBOL} | Price: ₹{put_ltp} | PnL: ₹{pnl:.2f}")
                         put_entry = None
                         algo_state["put_entry"] = None
 
@@ -242,11 +233,10 @@ def run_algo(config: AlgoConfig):
                 time.sleep(2)
 
         except Exception as e:
-            log(f"Error: {e}")
+            log(f"[ERROR] {e}")
             time.sleep(10)
 
     algo_state["running"] = False
-    log("Algo stopped.")
 
 
 # ── FastAPI App ──
@@ -305,7 +295,6 @@ def zerodha_callback(request: Request):
         profile = kite.profile()
         algo_state["user_name"] = profile["user_name"]
 
-        # Redirect to dashboard
         return RedirectResponse(url="/")
 
     except Exception as e:
@@ -328,6 +317,21 @@ def auth_status():
     }
 
 
+# ── Logout ──
+@app.post("/logout")
+def logout():
+    stop_flag.set()
+    algo_state["running"]      = False
+    algo_state["logged_in"]    = False
+    algo_state["user_name"]    = None
+    algo_state["access_token"] = None
+    algo_state["logs"]         = []
+    algo_state["pnl"]          = 0.0
+    algo_state["call_entry"]   = None
+    algo_state["put_entry"]    = None
+    return {"status": "logged out"}
+
+
 # ── Start algo ──
 @app.post("/start")
 def start_algo(config: AlgoConfig):
@@ -339,13 +343,13 @@ def start_algo(config: AlgoConfig):
     if algo_state["running"]:
         return {"status": "already running"}
 
-    algo_state["dry_run"]     = config.dry_run
-    stop_flag.clear()
-    algo_state["running"]     = True
-    algo_state["logs"]        = []
-    algo_state["pnl"]         = 0.0
-    algo_state["call_entry"]  = None
-    algo_state["put_entry"]   = None
+    algo_state["dry_run"]    = config.dry_run
+    stop_flag                = threading.Event()
+    algo_state["running"]    = True
+    algo_state["logs"]       = []
+    algo_state["pnl"]        = 0.0
+    algo_state["call_entry"] = None
+    algo_state["put_entry"]  = None
 
     algo_thread = threading.Thread(target=run_algo, args=(config,), daemon=True)
     algo_thread.start()
@@ -359,14 +363,6 @@ def stop_algo():
     algo_state["running"] = False
     return {"status": "stopping"}
 
-@app.post("/logout")
-def logout():
-    algo_state["logged_in"]    = False
-    algo_state["user_name"]    = None
-    algo_state["access_token"] = None
-    stop_flag.set()
-    algo_state["running"] = False
-    return {"status": "logged out"}
 
 # ── Status ──
 @app.get("/status")
