@@ -1,12 +1,17 @@
 # utils.py
+from datetime import datetime
 import pandas as pd
+import pytz
+IST = pytz.timezone("Asia/Kolkata")
 
 def resolve_ce_pe_by_strikes(kite, call_strike, put_strike):
     instruments = pd.DataFrame(kite.instruments("BFO"))
 
     sensex_opts = instruments[instruments["tradingsymbol"].str.startswith("SENSEX")]
-    sensex_opts = sensex_opts.sort_values("expiry")
 
+    today = datetime.now(IST).date()
+    sensex_opts = sensex_opts[sensex_opts["expiry"] >= today]
+    sensex_opts = sensex_opts.sort_values("expiry")
     nearest_expiry = sensex_opts.iloc[0]["expiry"]
 
     ce_row = sensex_opts[

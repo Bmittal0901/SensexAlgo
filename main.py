@@ -13,7 +13,9 @@ from zerodha_client import get_kite
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# ---------------- Market Hours Guard ----------------
+# SET TO False WHEN READY TO TRADE REAL MONEY
+DRY_RUN = True
+
 def is_market_open():
     now = datetime.now(IST)
     if now.weekday() >= 5:
@@ -26,10 +28,42 @@ def is_eod():
     now = datetime.now(IST)
     return now >= now.replace(hour=15, minute=20, second=0, microsecond=0)
 
+
+# ---------------- Order Placement ----------------
+def place_order(kite, symbol, qty, transaction_type):
+    exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
+    action = "BUY" if transaction_type == kite.TRANSACTION_TYPE_BUY else "SELL"
+
+    if DRY_RUN:
+        print(f"[DRY RUN] {action} {qty} x {symbol} at {exec_time}")
+        return "DRY_RUN_ORDER"
+
+    try:
+        order_id = kite.place_order(
+            variety=kite.VARIETY_REGULAR,
+            exchange=kite.EXCHANGE_BFO,
+            tradingsymbol=symbol,
+            transaction_type=transaction_type,
+            quantity=qty,
+            product=kite.PRODUCT_MIS,
+            order_type=kite.ORDER_TYPE_MARKET,
+        )
+        print(f"[ORDER PLACED] {action} {qty} x {symbol} | Order ID: {order_id} | Time: {exec_time}")
+        return order_id
+    except Exception as e:
+        print(f"[ORDER FAILED] {action} {symbol} | Error: {e}")
+        return None
+
+
 # ---------------- Zerodha Login ----------------
 ACCESS_TOKEN = input("Paste Zerodha ACCESS_TOKEN for today: ").strip()
 kite = get_kite(ACCESS_TOKEN)
 print("Logged in as:", kite.profile()["user_name"])
+
+if DRY_RUN:
+    print("\n  DRY RUN MODE — No real orders will be placed.\n")
+else:
+    print("\n LIVE MODE — Real orders will be placed!\n")
 
 # ---------------- User Inputs ----------------
 user = get_user_inputs()
@@ -62,14 +96,15 @@ print("Quantity  :", QTY)
 # ---------------- State ----------------
 call_entry = None
 put_entry  = None
+total_pnl  = 0.0
 
 # ---- Startup: skip forming candle ----
 init_candles = get_candles_zk(kite, CE_TOKEN, ZK_TF)
 last_seen_candle_time = pd.DataFrame(init_candles).iloc[-1]["date"] if init_candles else None
-print(f"Startup candle time set to: {last_seen_candle_time}\n")
-
+print(f"\nStartup candle time set to: {last_seen_candle_time}\n")
 print("Algo started. Waiting for EMA crossover signals...\n")
 
+# ---------------- Main Loop ----------------
 while True:
     try:
         # ---- Market hours check ----
@@ -99,73 +134,90 @@ while True:
 
         last_seen_candle_time = current_candle_time
 
-        # ---- Check crossover on last CLOSED candle (iloc[-2], iloc[-3]) ----
+        # ---- Check crossover on last CLOSED candle ----
         ce_signal = bullish_crossover(ce_df)
         pe_signal = bullish_crossover(pe_df)
 
-        # ---- ENTRY: buy at closing price of the crossover candle (iloc[-2]) ----
+        # ---- ENTRY ----
         if ce_signal and call_entry is None:
+            place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_BUY)
             call_entry = ce_df.iloc[-2]["close"]
             exec_time  = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
-            print(f"[BUY - CE] {CALL_SYMBOL} | Qty: {QTY} | Price: ₹{call_entry}")
-            print(f"Order executed at: {exec_time}")
-            print(" CE LEG ENTERED\n")
+            print(f"[BUY - CE] {CALL_SYMBOL} | Qty: {QTY} | Price: ₹{call_entry} | Time: {exec_time}")
+            print(">> CE LEG ENTERED\n")
 
         if pe_signal and put_entry is None:
+            place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_BUY)
             put_entry = pe_df.iloc[-2]["close"]
             exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
-            print(f"[BUY - PE] {PUT_SYMBOL} | Qty: {QTY} | Price: ₹{put_entry}")
-            print(f"Order executed at: {exec_time}")
-            print(" PE LEG ENTERED\n")
+            print(f"[BUY - PE] {PUT_SYMBOL} | Qty: {QTY} | Price: ₹{put_entry} | Time: {exec_time}")
+            print(">> PE LEG ENTERED\n")
 
-        # ---- TP/SL inner loop: runs every 2 seconds until next candle ----
+        # ---- TP/SL inner loop ----
         while True:
             if not is_market_open():
                 break
 
+            exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
+
             # ---- EOD square-off ----
             if is_eod():
                 if call_entry is not None:
-                    eod_ltp   = kite.ltp(f"BFO:{CALL_SYMBOL}")[f"BFO:{CALL_SYMBOL}"]["last_price"]
-                    exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
-                    print(f"[SELL - EOD] {CALL_SYMBOL} | Qty: {QTY} | Price: ₹{eod_ltp} | Time: {exec_time}")
+                    eod_ltp = kite.ltp(f"BFO:{CALL_SYMBOL}")[f"BFO:{CALL_SYMBOL}"]["last_price"]
+                    place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
+                    pnl = (eod_ltp - call_entry) * QTY
+                    total_pnl += pnl
+                    print(f"[SELL - EOD] {CALL_SYMBOL} | Price: ₹{eod_ltp} | PnL: ₹{pnl:.2f} | Time: {exec_time}")
+                    print(">> CE LEG EXITED (EOD)\n")
                     call_entry = None
-                    print(">> CE LEG EXITED (EOD Square-off)\n")
                 if put_entry is not None:
-                    eod_ltp   = kite.ltp(f"BFO:{PUT_SYMBOL}")[f"BFO:{PUT_SYMBOL}"]["last_price"]
-                    exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
-                    print(f"[SELL - EOD] {PUT_SYMBOL} | Qty: {QTY} | Price: ₹{eod_ltp} | Time: {exec_time}")
+                    eod_ltp = kite.ltp(f"BFO:{PUT_SYMBOL}")[f"BFO:{PUT_SYMBOL}"]["last_price"]
+                    place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
+                    pnl = (eod_ltp - put_entry) * QTY
+                    total_pnl += pnl
+                    print(f"[SELL - EOD] {PUT_SYMBOL} | Price: ₹{eod_ltp} | PnL: ₹{pnl:.2f} | Time: {exec_time}")
+                    print(">> PE LEG EXITED (EOD)\n")
                     put_entry = None
-                    print(">> PE LEG EXITED (EOD Square-off)\n")
+                print(f"── Total PnL for today: ₹{total_pnl:.2f} ──\n")
                 break
 
             # ---- CE TP/SL ----
             if call_entry is not None:
-                call_ltp  = kite.ltp(f"BFO:{CALL_SYMBOL}")[f"BFO:{CALL_SYMBOL}"]["last_price"]
-                exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
+                call_ltp = kite.ltp(f"BFO:{CALL_SYMBOL}")[f"BFO:{CALL_SYMBOL}"]["last_price"]
                 if call_ltp >= call_entry + PROFIT_POINTS:
-                    print(f"[SELL - TARGET]   {CALL_SYMBOL} | Qty: {QTY} | Price: ₹{call_ltp} | Time: {exec_time}")
+                    place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
+                    pnl = (call_ltp - call_entry) * QTY
+                    total_pnl += pnl
+                    print(f"[SELL - TARGET] {CALL_SYMBOL} | Price: ₹{call_ltp} | PnL: ₹{pnl:.2f} | Time: {exec_time}")
+                    print(">> CE LEG EXITED (Target hit)\n")
                     call_entry = None
-                    print(" CE LEG EXITED (Target hit)\n")
                 elif call_ltp <= call_entry - STOPLOSS_POINTS:
-                    print(f"[SELL - STOPLOSS] {CALL_SYMBOL} | Qty: {QTY} | Price: ₹{call_ltp} | Time: {exec_time}")
+                    place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
+                    pnl = (call_ltp - call_entry) * QTY
+                    total_pnl += pnl
+                    print(f"[SELL - STOPLOSS] {CALL_SYMBOL} | Price: ₹{call_ltp} | PnL: ₹{pnl:.2f} | Time: {exec_time}")
+                    print(">> CE LEG EXITED (Stoploss hit)\n")
                     call_entry = None
-                    print(" CE LEG EXITED (Stoploss hit)\n")
 
             # ---- PE TP/SL ----
             if put_entry is not None:
-                put_ltp   = kite.ltp(f"BFO:{PUT_SYMBOL}")[f"BFO:{PUT_SYMBOL}"]["last_price"]
-                exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
+                put_ltp = kite.ltp(f"BFO:{PUT_SYMBOL}")[f"BFO:{PUT_SYMBOL}"]["last_price"]
                 if put_ltp >= put_entry + PROFIT_POINTS:
-                    print(f"[SELL - TARGET]   {PUT_SYMBOL} | Qty: {QTY} | Price: ₹{put_ltp} | Time: {exec_time}")
+                    place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
+                    pnl = (put_ltp - put_entry) * QTY
+                    total_pnl += pnl
+                    print(f"[SELL - TARGET] {PUT_SYMBOL} | Price: ₹{put_ltp} | PnL: ₹{pnl:.2f} | Time: {exec_time}")
+                    print(">> PE LEG EXITED (Target hit)\n")
                     put_entry = None
-                    print(" PE LEG EXITED (Target hit)\n")
                 elif put_ltp <= put_entry - STOPLOSS_POINTS:
-                    print(f"[SELL - STOPLOSS] {PUT_SYMBOL} | Qty: {QTY} | Price: ₹{put_ltp} | Time: {exec_time}")
+                    place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
+                    pnl = (put_ltp - put_entry) * QTY
+                    total_pnl += pnl
+                    print(f"[SELL - STOPLOSS] {PUT_SYMBOL} | Price: ₹{put_ltp} | PnL: ₹{pnl:.2f} | Time: {exec_time}")
+                    print(">> PE LEG EXITED (Stoploss hit)\n")
                     put_entry = None
-                    print(" PE LEG EXITED (Stoploss hit)\n")
 
-            # ---- Check if new candle formed → break to outer loop ----
+            # ---- Check if new candle formed ----
             ce_candles_check = get_candles_zk(kite, CE_TOKEN, ZK_TF)
             if ce_candles_check:
                 new_time = pd.DataFrame(ce_candles_check).iloc[-1]["date"]
