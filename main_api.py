@@ -122,6 +122,9 @@ def run_algo(config: AlgoConfig):
     algo_state["stoploss_points"] = config.stoploss_points
     algo_state["expiry"]          = str(EXPIRY)
 
+    mode = "DRY RUN" if config.dry_run else "LIVE"
+    log(f"Logged in as {algo_state['user_name']} | Algo started | Mode: {mode} | CE: {CALL_SYMBOL} | PE: {PUT_SYMBOL} | Qty: {QTY} | Expiry: {EXPIRY}")
+
     init_candles = get_candles_zk(kite, CE_TOKEN, ZK_TF)
     last_seen_candle_time = pd.DataFrame(init_candles).iloc[-1]["date"] if init_candles else None
 
@@ -321,6 +324,7 @@ def auth_status():
 @app.post("/logout")
 def logout():
     stop_flag.set()
+    log("User logged out. Algo stopped.")
     algo_state["running"]      = False
     algo_state["logged_in"]    = False
     algo_state["user_name"]    = None
