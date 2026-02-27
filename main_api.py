@@ -356,8 +356,8 @@ def start_algo(config: AlgoConfig):
 @app.post("/stop")
 def stop_algo():
     stop_flag.set()
+    algo_state["running"] = False
     return {"status": "stopping"}
-
 
 # ── Status ──
 @app.get("/status")

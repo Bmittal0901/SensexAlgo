@@ -473,11 +473,13 @@
 
   // Stop
   async function stopAlgo() {
-    try {
-      await fetch(`${API}/stop`, {method:"POST"});
-      document.getElementById("stopBtn").disabled = true;
-    } catch(e) {}
-  }
+  const btn = document.getElementById("stopBtn");
+  btn.disabled = true;
+  btn.textContent = "STOPPING...";
+  try {
+    await fetch(`${API}/stop`, {method:"POST"});
+  } catch(e) {}
+}
 
   // Polling
   function startPolling() {
@@ -500,9 +502,14 @@
     const stopBtn = document.getElementById("stopBtn");
 
     if (data.running) {
-      dot.classList.add("on"); lbl.textContent = "RUNNING"; lbl.classList.add("on"); stopBtn.disabled = false;
+    dot.classList.add("on"); lbl.textContent = "RUNNING"; lbl.classList.add("on");
+    if (document.getElementById("stopBtn").textContent !== "STOPPING...") {
+    stopBtn.disabled = false;
+    }
     } else {
-      dot.classList.remove("on"); lbl.textContent = "STOPPED"; lbl.classList.remove("on"); stopBtn.disabled = true;
+  dot.classList.remove("on"); lbl.textContent = "STOPPED"; lbl.classList.remove("on");
+  stopBtn.disabled = true;
+  stopBtn.textContent = "STOP ALGO";
     }
 
     document.getElementById("expiryVal").textContent = data.expiry || "--";
