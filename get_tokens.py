@@ -13,3 +13,7 @@ pe_symbol = input("Enter PE tradingsymbol (e.g., SENSEX27FEB78000PE): ").strip()
 
 print("CE token:", instruments[instruments["tradingsymbol"] == ce_symbol]["instrument_token"].values[0])
 print("PE token:", instruments[instruments["tradingsymbol"] == pe_symbol]["instrument_token"].values[0])
+<<<<<<< HEAD
+=======
+
+>>>>>>> d3468d04cd2f9d38901632a83bf2863506e40df9
