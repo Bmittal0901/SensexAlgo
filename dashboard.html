@@ -115,6 +115,9 @@
     .theme-btn { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:6px 10px; cursor:pointer; font-size:15px; transition:border-color 0.2s; line-height:1; }
     .theme-btn:hover { border-color:var(--accent); }
 
+    .logout-btn { background:transparent; border:1px solid var(--muted); color:var(--muted); padding:6px 14px; border-radius:8px; font-family:var(--mono); font-size:10px; letter-spacing:1px; cursor:pointer; transition:all 0.2s; }
+    .logout-btn:hover { border-color:var(--red); color:var(--red); }
+
     .dry-badge { font-family:var(--mono); font-size:10px; letter-spacing:1px; padding:4px 10px; border-radius:4px; background:rgba(255,193,7,0.12); color:var(--yellow); border:1px solid rgba(255,193,7,0.25); display:none; }
     .dry-badge.on { display:block; }
 
@@ -282,6 +285,7 @@
       <div class="dry-badge" id="dryBadge">DRY RUN</div>
       <div class="clock" id="clock">--:--:--</div>
       <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">☀️</button>
+      <button class="logout-btn" onclick="logout()">LOGOUT</button>
     </div>
   </div>
 
@@ -339,10 +343,11 @@
 </div>
 
 <script>
-  const API = "https://sensex-algo.up.railway.app";
+  const API = "http://127.0.0.1:8000";  // ← replace with Railway URL
   let pollInterval = null;
   let lastLogCount = 0;
   let dryRun = true;
+  let stopping = false;
 
   // Clock
   function updateClock() {
@@ -397,6 +402,17 @@
     } catch(e) {
       alert("Cannot connect to server. Is uvicorn running?");
     }
+  }
+
+  // Logout
+  async function logout() {
+    if (!confirm("Are you sure you want to logout?")) return;
+    try {
+      await fetch(`${API}/logout`, {method:"POST"});
+    } catch(e) {}
+    if (pollInterval) clearInterval(pollInterval);
+    stopping = false;
+    goToScreen(1);
   }
 
   // Dry run toggle
@@ -454,6 +470,7 @@
 
       if (data.status === "started" || data.status === "already running") {
         document.getElementById("dryBadge").classList.toggle("on", dryRun);
+        stopping = false;
         goToScreen(3);
         lastLogCount = 0;
         startPolling();
@@ -473,13 +490,14 @@
 
   // Stop
   async function stopAlgo() {
-  const btn = document.getElementById("stopBtn");
-  btn.disabled = true;
-  btn.textContent = "STOPPING...";
-  try {
-    await fetch(`${API}/stop`, {method:"POST"});
-  } catch(e) {}
-}
+    const btn = document.getElementById("stopBtn");
+    btn.disabled = true;
+    btn.textContent = "STOPPING...";
+    stopping = true;
+    try {
+      await fetch(`${API}/stop`, {method:"POST"});
+    } catch(e) {}
+  }
 
   // Polling
   function startPolling() {
@@ -502,14 +520,20 @@
     const stopBtn = document.getElementById("stopBtn");
 
     if (data.running) {
-    dot.classList.add("on"); lbl.textContent = "RUNNING"; lbl.classList.add("on");
-    if (document.getElementById("stopBtn").textContent !== "STOPPING...") {
-    stopBtn.disabled = false;
-    }
+      dot.classList.add("on");
+      lbl.textContent = "RUNNING";
+      lbl.classList.add("on");
+      if (!stopping) {
+        stopBtn.disabled = false;
+        stopBtn.textContent = "STOP ALGO";
+      }
     } else {
-  dot.classList.remove("on"); lbl.textContent = "STOPPED"; lbl.classList.remove("on");
-  stopBtn.disabled = true;
-  stopBtn.textContent = "STOP ALGO";
+      dot.classList.remove("on");
+      lbl.textContent = "STOPPED";
+      lbl.classList.remove("on");
+      stopBtn.disabled = true;
+      stopBtn.textContent = "STOP ALGO";
+      stopping = false;
     }
 
     document.getElementById("expiryVal").textContent = data.expiry || "--";

@@ -359,6 +359,15 @@ def stop_algo():
     algo_state["running"] = False
     return {"status": "stopping"}
 
+@app.post("/logout")
+def logout():
+    algo_state["logged_in"]    = False
+    algo_state["user_name"]    = None
+    algo_state["access_token"] = None
+    stop_flag.set()
+    algo_state["running"] = False
+    return {"status": "logged out"}
+
 # ── Status ──
 @app.get("/status")
 def get_status():
