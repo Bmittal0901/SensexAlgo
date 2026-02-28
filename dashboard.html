@@ -347,7 +347,7 @@
 </div>
 
 <script>
-  const API = "https://sensexalgo.onrender/";  // ← replace with Railway URL
+  const API = window.location.origin;  // ← replace with Railway URL
   let pollInterval = null;
   let lastLogCount = 0;
   let dryRun = true;
