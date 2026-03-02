@@ -249,7 +249,7 @@
       <div class="form-group">
         <label>Timeframe</label>
         <select id="timeframe">
-          <option value="1m">1 Minutes</option>
+          <option value="1m">1 Minute</option>
           <option value="3m">3 Minutes</option>
           <option value="5m" selected>5 Minutes</option>
           <option value="15m">15 Minutes</option>
@@ -353,6 +353,8 @@
   let lastLogCount = 0;
   let dryRun = true;
   let stopping = false;
+  let lastConfig = null;
+
 
   // Clock
   function updateClock() {
@@ -505,7 +507,6 @@
     } catch(e) {}
   }
 
-  let lastConfig = null;
 
   // Restart algo with same config
   async function restartAlgo() {

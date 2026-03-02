@@ -79,7 +79,7 @@ TIMEFRAME       = user["TIMEFRAME"]
 QTY = LOTS * LOT_SIZE
 
 # ---------------- Auto-resolve CE/PE contracts ----------------
-TF_MAP = {"1m":"1minute", "3m": "3minute", "5m": "5minute", "15m": "15minute"}
+TF_MAP = {"1m":"minute", "3m": "3minute", "5m": "5minute", "15m": "15minute"}
 ZK_TF  = TF_MAP[TIMEFRAME]
 
 CALL_SYMBOL, PUT_SYMBOL, CE_TOKEN, PE_TOKEN, EXPIRY = resolve_ce_pe_by_strikes(
