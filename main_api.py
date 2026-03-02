@@ -94,7 +94,7 @@ def place_order(kite, symbol, qty, transaction_type):
 
 # ── Algo Thread ──
 def run_algo(config: AlgoConfig):
-    TF_MAP   = {"3m": "3minute", "5m": "5minute", "15m": "15minute"}
+    TF_MAP   = {"1m": "1minute", "3m": "3minute", "5m": "5minute", "15m": "15minute"}
     ZK_TF    = TF_MAP[config.timeframe]
     LOT_SIZE = 20
     QTY      = config.lots * LOT_SIZE
