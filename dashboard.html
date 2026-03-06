@@ -144,6 +144,9 @@
     .stop-btn { background:transparent; border:1px solid var(--red); color:var(--red); padding:9px 22px; border-radius:8px; font-family:var(--mono); font-size:11px; letter-spacing:1px; cursor:pointer; transition:all 0.2s; }
     .stop-btn:hover { background:var(--red); color:#fff; }
     .stop-btn:disabled { opacity:0.3; cursor:not-allowed; }
+    .restart-btn { background:transparent; border:1px solid var(--yellow); color:var(--yellow); padding:9px 22px; border-radius:8px; font-family:var(--mono); font-size:11px; letter-spacing:1px; cursor:pointer; transition:all 0.2s; }
+    .restart-btn:hover { background:var(--yellow); color:#000; }
+    .restart-btn:disabled { opacity:0.3; cursor:not-allowed; }
 
     .pos-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; position:relative; overflow:hidden; }
     .pos-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--border2),transparent); }
@@ -246,6 +249,7 @@
       <div class="form-group">
         <label>Timeframe</label>
         <select id="timeframe">
+          <option value="1m">1 Minute</option>
           <option value="3m">3 Minutes</option>
           <option value="5m" selected>5 Minutes</option>
           <option value="15m">15 Minutes</option>
@@ -306,6 +310,7 @@
         <div class="pnl-val" id="pnlVal">₹0.00</div>
       </div>
       <button class="stop-btn" id="stopBtn" onclick="stopAlgo()">STOP ALGO</button>
+      <button class="restart-btn" id="restartBtn" onclick="restartAlgo()">RESTART</button>
     </div>
 
     <div class="pos-card">
@@ -343,11 +348,12 @@
 </div>
 
 <script>
-  const API = "http://sensex-algo.up.railway.app/";  // ← replace with Railway URL
+  const API = window.location.origin;
   let pollInterval = null;
   let lastLogCount = 0;
   let dryRun = true;
   let stopping = false;
+  let lastConfig = null;
 
   // Clock
   function updateClock() {
@@ -381,24 +387,17 @@
   // Init
   async function init() {
     applyTheme();
-
-    // Retry up to 3 times in case of network hiccup on wake
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const authRes  = await fetch(`${API}/auth-status`);
         const authData = await authRes.json();
-
         if (!authData.logged_in) {
           goToScreen(1);
           return;
         }
-
         document.getElementById("userName").textContent = authData.user_name;
-
-        // Check if algo is already running
         const statusRes  = await fetch(`${API}/status`);
         const statusData = await statusRes.json();
-
         if (statusData.running) {
           document.getElementById("dryBadge").classList.toggle("on", statusData.dry_run);
           goToScreen(3);
@@ -406,13 +405,11 @@
         } else {
           goToScreen(2);
         }
-        return; // success, exit retry loop
-
+        return;
       } catch(e) {
         if (attempt < 2) {
-          await new Promise(r => setTimeout(r, 2000)); // wait 2s before retry
+          await new Promise(r => setTimeout(r, 2000));
         } else {
-          // Only go to login after all retries fail
           goToScreen(1);
         }
       }
@@ -487,6 +484,7 @@
     btn.innerHTML = '<span class="spinner"></span>STARTING...';
 
     try {
+      lastConfig = config;
       const res  = await fetch(`${API}/start`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -523,6 +521,37 @@
     try {
       await fetch(`${API}/stop`, {method:"POST"});
     } catch(e) {}
+  }
+
+  // Restart algo with same config
+  async function restartAlgo() {
+    if (!lastConfig) {
+      alert("No previous config found. Please go back to setup.");
+      return;
+    }
+    const btn = document.getElementById("restartBtn");
+    btn.disabled = true;
+    btn.textContent = "STARTING...";
+    try {
+      const res = await fetch(`${API}/start`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(lastConfig),
+      });
+      const data = await res.json();
+      if (data.status === "started" || data.status === "already running") {
+        btn.disabled = false;
+        btn.textContent = "RESTART";
+      } else {
+        alert(data.message || "Failed to start algo.");
+        btn.disabled = false;
+        btn.textContent = "RESTART";
+      }
+    } catch(e) {
+      alert("Cannot connect to server.");
+      btn.disabled = false;
+      btn.textContent = "RESTART";
+    }
   }
 
   // Polling
