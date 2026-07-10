@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Sensex Algo</title>
+  <title>Multi-Leg Options Algo</title>
   <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
   <style>
     :root {
@@ -193,7 +193,7 @@
 <div id="screen1" class="screen center-wrap active">
   <div class="card">
     <div class="brand">
-      <div class="brand-tag">Sensex Algo</div>
+      <div class="brand-tag">Multi-Leg Options Algo</div>
       <div class="brand-title">Welcome Back</div>
       <div class="brand-sub">Login with your Zerodha account to continue</div>
     </div>
@@ -220,9 +220,9 @@
 <div id="screen2" class="screen center-wrap">
   <div class="card">
     <div class="brand">
-      <div class="brand-tag">Sensex Algo</div>
-      <div class="brand-title">EMA Crossover</div>
-      <div class="brand-sub">BFO Options · Automated Strategy</div>
+      <div class="brand-tag">Multi-Leg Options Algo</div>
+      <div class="brand-title">Straddle + Ratio Strangle</div>
+      <div class="brand-sub">4-Leg · Combined-Loss Exit</div>
     </div>
     <div class="user-chip">
       <div class="user-dot"></div>
@@ -232,36 +232,46 @@
     <div class="section-label">Contract Setup</div>
     <div class="form-grid" style="margin-bottom:20px">
       <div class="form-group">
-        <label>CE Strike</label>
-        <input type="number" id="call_strike" placeholder="e.g. 82700"/>
+        <label>Index</label>
+        <select id="index">
+          <option value="SENSEX" selected>SENSEX</option>
+          <option value="NIFTY">NIFTY</option>
+        </select>
       </div>
       <div class="form-group">
-        <label>PE Strike</label>
-        <input type="number" id="put_strike" placeholder="e.g. 82400"/>
+        <label>Expiry</label>
+        <input type="date" id="expiry"/>
+      </div>
+      <div class="form-group">
+        <label>Buy Strike (CE+PE)</label>
+        <input type="number" id="buy_strike" placeholder="e.g. 82500"/>
+      </div>
+      <div class="form-group">
+        <label>Lot Size</label>
+        <input type="number" id="lot_size" placeholder="e.g. 20" min="1"/>
+      </div>
+      <div class="form-group">
+        <label>Sell CE Strike</label>
+        <input type="number" id="sell_ce_strike" placeholder="e.g. 83000"/>
+      </div>
+      <div class="form-group">
+        <label>Sell PE Strike</label>
+        <input type="number" id="sell_pe_strike" placeholder="e.g. 82000"/>
       </div>
     </div>
     <div class="section-label">Strategy Parameters</div>
     <div class="form-grid" style="margin-bottom:20px">
       <div class="form-group">
-        <label>Lots</label>
-        <input type="number" id="lots" value="1" min="1"/>
+        <label>Buy Lots</label>
+        <input type="number" id="buy_lots" value="1" min="1"/>
       </div>
       <div class="form-group">
-        <label>Timeframe</label>
-        <select id="timeframe">
-          <option value="1m">1 Minute</option>
-          <option value="3m">3 Minutes</option>
-          <option value="5m" selected>5 Minutes</option>
-          <option value="15m">15 Minutes</option>
-        </select>
+        <label>Sell Lots (auto, 3x)</label>
+        <input type="number" id="sell_lots_display" value="3" disabled/>
       </div>
-      <div class="form-group">
-        <label>Profit Points</label>
-        <input type="number" id="profit_points" value="30" min="1"/>
-      </div>
-      <div class="form-group">
-        <label>Stoploss Points</label>
-        <input type="number" id="stoploss_points" value="30" min="1"/>
+      <div class="form-group" style="grid-column:1/3">
+        <label>Max Combined Loss (₹)</label>
+        <input type="number" id="max_loss" placeholder="e.g. 15000" min="1"/>
       </div>
     </div>
     <div class="section-label">Mode</div>
@@ -274,6 +284,12 @@
     </div>
     <div class="error-msg" id="setupError"></div>
     <button class="btn-primary" id="setupBtn" onclick="handleSetup()">LAUNCH ALGO</button>
+    <script>
+      document.getElementById("buy_lots").addEventListener("input", function() {
+        const v = parseInt(this.value) || 0;
+        document.getElementById("sell_lots_display").value = v * 3;
+      });
+    </script>
   </div>
 </div>
 
@@ -300,10 +316,10 @@
         <div class="status-lbl" id="statusText">STARTING</div>
       </div>
       <div class="chips">
+        <div class="chip">Index <span id="indexVal">--</span></div>
         <div class="chip">Expiry <span id="expiryVal">--</span></div>
-        <div class="chip">Qty <span id="qtyVal">--</span></div>
-        <div class="chip">TP <span id="tpVal">--</span> pts</div>
-        <div class="chip">SL <span id="slVal">--</span> pts</div>
+        <div class="chip">Max Loss <span id="maxLossVal">--</span></div>
+        <div class="chip">Combined Loss <span id="combinedLossVal">--</span></div>
       </div>
       <div class="pnl-block">
         <div class="pnl-lbl">Total P&L</div>
@@ -315,24 +331,46 @@
 
     <div class="pos-card">
       <div class="pos-head">
-        <div class="pos-type">CE LEG</div>
-        <div class="pos-badge" id="ceBadge">WAITING</div>
+        <div class="pos-type">BUY CE</div>
+        <div class="pos-badge" id="BUY_CEBadge">WAITING</div>
       </div>
-      <div class="pos-symbol" id="ceSymbol">No Position</div>
-      <div class="pos-row"><span class="r-lbl">Entry</span><span class="r-val" id="ceEntry">--</span></div>
-      <div class="pos-row"><span class="r-lbl">Target</span><span class="r-val" id="ceTarget">--</span></div>
-      <div class="pos-row"><span class="r-lbl">Stoploss</span><span class="r-val" id="ceSL">--</span></div>
+      <div class="pos-symbol" id="BUY_CESymbol">No Position</div>
+      <div class="pos-row"><span class="r-lbl">Qty</span><span class="r-val" id="BUY_CEQty">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Entry</span><span class="r-val" id="BUY_CEEntry">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Current</span><span class="r-val" id="BUY_CECurrent">--</span></div>
     </div>
 
     <div class="pos-card">
       <div class="pos-head">
-        <div class="pos-type">PE LEG</div>
-        <div class="pos-badge" id="peBadge">WAITING</div>
+        <div class="pos-type">BUY PE</div>
+        <div class="pos-badge" id="BUY_PEBadge">WAITING</div>
       </div>
-      <div class="pos-symbol" id="peSymbol">No Position</div>
-      <div class="pos-row"><span class="r-lbl">Entry</span><span class="r-val" id="peEntry">--</span></div>
-      <div class="pos-row"><span class="r-lbl">Target</span><span class="r-val" id="peTarget">--</span></div>
-      <div class="pos-row"><span class="r-lbl">Stoploss</span><span class="r-val" id="peSL">--</span></div>
+      <div class="pos-symbol" id="BUY_PESymbol">No Position</div>
+      <div class="pos-row"><span class="r-lbl">Qty</span><span class="r-val" id="BUY_PEQty">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Entry</span><span class="r-val" id="BUY_PEEntry">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Current</span><span class="r-val" id="BUY_PECurrent">--</span></div>
+    </div>
+
+    <div class="pos-card">
+      <div class="pos-head">
+        <div class="pos-type">SELL CE</div>
+        <div class="pos-badge" id="SELL_CEBadge">WAITING</div>
+      </div>
+      <div class="pos-symbol" id="SELL_CESymbol">No Position</div>
+      <div class="pos-row"><span class="r-lbl">Qty</span><span class="r-val" id="SELL_CEQty">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Entry</span><span class="r-val" id="SELL_CEEntry">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Current</span><span class="r-val" id="SELL_CECurrent">--</span></div>
+    </div>
+
+    <div class="pos-card">
+      <div class="pos-head">
+        <div class="pos-type">SELL PE</div>
+        <div class="pos-badge" id="SELL_PEBadge">WAITING</div>
+      </div>
+      <div class="pos-symbol" id="SELL_PESymbol">No Position</div>
+      <div class="pos-row"><span class="r-lbl">Qty</span><span class="r-val" id="SELL_PEQty">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Entry</span><span class="r-val" id="SELL_PEEntry">--</span></div>
+      <div class="pos-row"><span class="r-lbl">Current</span><span class="r-val" id="SELL_PECurrent">--</span></div>
     </div>
 
     <div class="log-panel">
@@ -461,20 +499,24 @@
     err.textContent = "";
 
     const config = {
-      call_strike:     parseInt(document.getElementById("call_strike").value),
-      put_strike:      parseInt(document.getElementById("put_strike").value),
-      lots:            parseInt(document.getElementById("lots").value),
-      profit_points:   parseInt(document.getElementById("profit_points").value),
-      stoploss_points: parseInt(document.getElementById("stoploss_points").value),
-      timeframe:       document.getElementById("timeframe").value,
-      dry_run:         dryRun,
+      index:          document.getElementById("index").value,
+      expiry:         document.getElementById("expiry").value,
+      buy_strike:     parseInt(document.getElementById("buy_strike").value),
+      sell_ce_strike: parseInt(document.getElementById("sell_ce_strike").value),
+      sell_pe_strike: parseInt(document.getElementById("sell_pe_strike").value),
+      buy_lots:       parseInt(document.getElementById("buy_lots").value),
+      lot_size:       parseInt(document.getElementById("lot_size").value),
+      max_loss:       parseFloat(document.getElementById("max_loss").value),
+      dry_run:        dryRun,
     };
 
-    if (!config.call_strike)        { err.textContent = "CE strike is required."; return; }
-    if (!config.put_strike)         { err.textContent = "PE strike is required."; return; }
-    if (config.lots < 1)            { err.textContent = "Lots must be at least 1."; return; }
-    if (config.profit_points < 1)   { err.textContent = "Profit points must be positive."; return; }
-    if (config.stoploss_points < 1) { err.textContent = "Stoploss points must be positive."; return; }
+    if (!config.expiry)                { err.textContent = "Expiry date is required."; return; }
+    if (!config.buy_strike)            { err.textContent = "Buy strike is required."; return; }
+    if (!config.sell_ce_strike)        { err.textContent = "Sell CE strike is required."; return; }
+    if (!config.sell_pe_strike)        { err.textContent = "Sell PE strike is required."; return; }
+    if (config.buy_lots < 1)           { err.textContent = "Buy lots must be at least 1."; return; }
+    if (!config.lot_size || config.lot_size < 1) { err.textContent = "Lot size must be positive."; return; }
+    if (!config.max_loss || config.max_loss < 1) { err.textContent = "Max loss must be positive."; return; }
 
     if (!dryRun) {
       if (!confirm("⚠️ LIVE MODE: Real orders will be placed on Zerodha. Are you sure?")) return;
@@ -591,18 +633,23 @@
       stopping = false;
     }
 
+    document.getElementById("indexVal").textContent  = data.index  || "--";
     document.getElementById("expiryVal").textContent = data.expiry || "--";
-    document.getElementById("qtyVal").textContent    = data.qty    || "--";
-    document.getElementById("tpVal").textContent     = data.profit_points   || "--";
-    document.getElementById("slVal").textContent     = data.stoploss_points || "--";
+    document.getElementById("maxLossVal").textContent =
+      data.max_loss != null ? "₹" + Number(data.max_loss).toLocaleString("en-IN") : "--";
+
+    const combinedLoss = data.combined_loss || 0;
+    const clEl = document.getElementById("combinedLossVal");
+    clEl.textContent = "₹" + combinedLoss.toLocaleString("en-IN", {minimumFractionDigits:2});
+    clEl.style.color = combinedLoss > 0 ? "var(--red)" : combinedLoss < 0 ? "var(--green)" : "";
 
     const pnl   = data.pnl || 0;
     const pnlEl = document.getElementById("pnlVal");
     pnlEl.textContent = "₹" + pnl.toLocaleString("en-IN", {minimumFractionDigits:2});
     pnlEl.className   = "pnl-val" + (pnl > 0 ? " pos" : pnl < 0 ? " neg" : "");
 
-    updateCard("ce", data.call_entry, data.call_symbol, data.profit_points, data.stoploss_points);
-    updateCard("pe", data.put_entry,  data.put_symbol,  data.profit_points, data.stoploss_points);
+    const legs = data.legs || {};
+    ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"].forEach(leg => updateCard(leg, legs[leg]));
 
     const logs = data.logs || [];
     document.getElementById("logCount").textContent = logs.length + " entries";
@@ -614,11 +661,10 @@
       } else {
         box.innerHTML = logs.map(line => {
           let cls = "def";
-          if      (line.includes("[BUY"))            cls = "buy";
-          else if (line.includes("SELL - TARGET"))   cls = "target";
-          else if (line.includes("SELL - STOPLOSS")) cls = "sl";
-          else if (line.includes("SELL - EOD"))      cls = "eod";
-          else if (line.includes("Error"))           cls = "error";
+          if      (line.includes("ALL 4 LEGS ENTERED") || line.includes("[BUY_") || line.includes("[SELL_")) cls = "buy";
+          else if (line.includes("MAX LOSS HIT"))    cls = "sl";
+          else if (line.includes("EXIT - EOD"))      cls = "eod";
+          else if (line.includes("[ERROR]"))         cls = "error";
           return `<span class="log-line ${cls}">${line}</span>`;
         }).join("\n");
         box.scrollTop = box.scrollHeight;
@@ -626,25 +672,26 @@
     }
   }
 
-  function updateCard(leg, entry, symbol, tp, sl) {
+  function updateCard(leg, info) {
     const symEl    = document.getElementById(leg + "Symbol");
     const badge    = document.getElementById(leg + "Badge");
+    const qtyEl    = document.getElementById(leg + "Qty");
     const entryEl  = document.getElementById(leg + "Entry");
-    const targetEl = document.getElementById(leg + "Target");
-    const slEl     = document.getElementById(leg + "SL");
+    const curEl    = document.getElementById(leg + "Current");
 
-    if (entry != null) {
-      symEl.textContent = symbol || "--"; symEl.className = "pos-symbol on";
-      badge.textContent = "IN TRADE";    badge.className  = "pos-badge on";
-      entryEl.textContent  = "₹" + entry;                           entryEl.className  = "r-val on";
-      targetEl.textContent = "₹" + (entry + (tp || 0)).toFixed(2); targetEl.className = "r-val profit";
-      slEl.textContent     = "₹" + (entry - (sl || 0)).toFixed(2); slEl.className     = "r-val loss";
+    if (info && info.entry != null) {
+      symEl.textContent = info.symbol || "--"; symEl.className = "pos-symbol on";
+      badge.textContent = "IN TRADE";          badge.className  = "pos-badge on";
+      qtyEl.textContent   = info.qty ?? "--";   qtyEl.className   = "r-val on";
+      entryEl.textContent = "₹" + info.entry;   entryEl.className = "r-val on";
+      curEl.textContent   = info.current != null ? "₹" + info.current : "--";
+      curEl.className     = "r-val on";
     } else {
-      symEl.textContent = symbol || "No Position"; symEl.className = "pos-symbol";
-      badge.textContent = "WAITING";               badge.className = "pos-badge";
-      entryEl.textContent = "--";  entryEl.className  = "r-val";
-      targetEl.textContent = "--"; targetEl.className = "r-val";
-      slEl.textContent = "--";     slEl.className     = "r-val";
+      symEl.textContent = (info && info.symbol) || "No Position"; symEl.className = "pos-symbol";
+      badge.textContent = "WAITING";                              badge.className = "pos-badge";
+      qtyEl.textContent   = (info && info.qty) || "--"; qtyEl.className   = "r-val";
+      entryEl.textContent = "--";                        entryEl.className = "r-val";
+      curEl.textContent   = "--";                        curEl.className   = "r-val";
     }
   }
 

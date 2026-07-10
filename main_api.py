@@ -1,7 +1,6 @@
 # main_api.py
 import time
 import threading
-import pandas as pd
 from datetime import datetime
 import pytz
 import os
@@ -11,10 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from indicators import add_ema
-from strategy import bullish_crossover
-from data import get_candles_zk
-from utils import resolve_ce_pe_by_strikes
+from strategy import LEG_DIRECTIONS, compute_combined_loss, should_exit
+from utils import resolve_multi_leg_symbols
 from zerodha_client import get_kite
 from kiteconnect import KiteConnect
 from dotenv import load_dotenv
@@ -26,12 +23,18 @@ API_SECRET = os.getenv("API_SECRET")
 
 IST = pytz.timezone("Asia/Kolkata")
 
+LEGS = ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"]
+SELL_LOT_MULTIPLIER = 3
+
 # ── Global State ──
 algo_state = {
-    "running": False, "call_entry": None, "put_entry": None,
-    "call_symbol": None, "put_symbol": None, "qty": None,
-    "profit_points": None, "stoploss_points": None,
-    "expiry": None, "logs": [], "pnl": 0.0,
+    "running": False,
+    "legs": {},              # leg -> {symbol, qty, entry, current}
+    "combined_loss": 0.0,
+    "max_loss": None,
+    "expiry": None,
+    "index": None,
+    "logs": [], "pnl": 0.0,
     "access_token": None, "dry_run": True,
     "logged_in": False, "user_name": None,
 }
@@ -42,13 +45,15 @@ stop_flag   = threading.Event()
 
 # ── Model ──
 class AlgoConfig(BaseModel):
-    call_strike:     int
-    put_strike:      int
-    lots:            int
-    profit_points:   int
-    stoploss_points: int
-    timeframe:       str
-    dry_run:         bool = True
+    index:            str   # "SENSEX" or "NIFTY"
+    expiry:           str   # "YYYY-MM-DD"
+    buy_strike:       int   # BUY_CE + BUY_PE strike
+    sell_ce_strike:   int
+    sell_pe_strike:   int
+    buy_lots:         int
+    lot_size:         int
+    max_loss:         float
+    dry_run:          bool = True
 
 
 # ── Helpers ──
@@ -70,7 +75,11 @@ def is_eod():
     now = datetime.now(IST)
     return now >= now.replace(hour=15, minute=20, second=0, microsecond=0)
 
-def place_order(kite, symbol, qty, transaction_type):
+def get_ltp(kite, exchange, symbol):
+    key = f"{exchange}:{symbol}"
+    return kite.ltp(key)[key]["last_price"]
+
+def place_order(kite, exchange, symbol, qty, transaction_type):
     action = "BUY" if transaction_type == kite.TRANSACTION_TYPE_BUY else "SELL"
     if algo_state["dry_run"]:
         log(f"[DRY RUN] {action} {qty} x {symbol}")
@@ -78,7 +87,7 @@ def place_order(kite, symbol, qty, transaction_type):
     try:
         order_id = kite.place_order(
             variety=kite.VARIETY_REGULAR,
-            exchange=kite.EXCHANGE_BFO,
+            exchange=exchange,
             tradingsymbol=symbol,
             transaction_type=transaction_type,
             quantity=qty,
@@ -94,11 +103,6 @@ def place_order(kite, symbol, qty, transaction_type):
 
 # ── Algo Thread ──
 def run_algo(config: AlgoConfig):
-    TF_MAP   = {"1m":"minute", "3m": "3minute", "5m": "5minute", "15m": "15minute"}
-    ZK_TF    = TF_MAP[config.timeframe]
-    LOT_SIZE = 20
-    QTY      = config.lots * LOT_SIZE
-
     try:
         kite = get_kite()
     except Exception as e:
@@ -106,134 +110,103 @@ def run_algo(config: AlgoConfig):
         algo_state["running"] = False
         return
 
+    buy_lots  = config.buy_lots
+    sell_lots = buy_lots * SELL_LOT_MULTIPLIER
+    qty_buy   = buy_lots * config.lot_size
+    qty_sell  = sell_lots * config.lot_size
+
+    qtys = {
+        "BUY_CE":  qty_buy,
+        "BUY_PE":  qty_buy,
+        "SELL_CE": qty_sell,
+        "SELL_PE": qty_sell,
+    }
+
+    entry_txn = {
+        leg: (kite.TRANSACTION_TYPE_BUY if direction == "BUY" else kite.TRANSACTION_TYPE_SELL)
+        for leg, direction in LEG_DIRECTIONS.items()
+    }
+    exit_txn = {
+        leg: (kite.TRANSACTION_TYPE_SELL if direction == "BUY" else kite.TRANSACTION_TYPE_BUY)
+        for leg, direction in LEG_DIRECTIONS.items()
+    }
+
     try:
-        CALL_SYMBOL, PUT_SYMBOL, CE_TOKEN, PE_TOKEN, EXPIRY = resolve_ce_pe_by_strikes(
-            kite, config.call_strike, config.put_strike
+        legs, exchange = resolve_multi_leg_symbols(
+            kite, config.index, config.expiry,
+            config.buy_strike, config.sell_ce_strike, config.sell_pe_strike
         )
     except Exception as e:
         log(f"[ERROR] Failed to resolve contracts: {e}")
         algo_state["running"] = False
         return
 
-    algo_state["call_symbol"]     = CALL_SYMBOL
-    algo_state["put_symbol"]      = PUT_SYMBOL
-    algo_state["qty"]             = QTY
-    algo_state["profit_points"]   = config.profit_points
-    algo_state["stoploss_points"] = config.stoploss_points
-    algo_state["expiry"]          = str(EXPIRY)
+    algo_state["index"]    = config.index
+    algo_state["expiry"]   = config.expiry
+    algo_state["max_loss"] = config.max_loss
+    algo_state["legs"] = {
+        leg: {"symbol": legs[leg]["symbol"], "qty": qtys[leg], "entry": None, "current": None}
+        for leg in LEGS
+    }
 
     mode = "DRY RUN" if config.dry_run else "LIVE"
-    log(f"Logged in as {algo_state['user_name']} | Algo started | Mode: {mode} | CE: {CALL_SYMBOL} | PE: {PUT_SYMBOL} | Qty: {QTY} | Expiry: {EXPIRY}")
+    log(f"Logged in as {algo_state['user_name']} | Mode: {mode} | Expiry: {config.expiry}")
+    for leg in LEGS:
+        log(f"  {leg}: {legs[leg]['symbol']} (qty {qtys[leg]})")
 
-    init_candles = get_candles_zk(kite, CE_TOKEN, ZK_TF)
-    last_seen_candle_time = pd.DataFrame(init_candles).iloc[-1]["date"] if init_candles else None
+    # ── Wait for market open, then enter all 4 legs ──
+    while not stop_flag.is_set() and not is_market_open():
+        time.sleep(30)
 
-    call_entry = None
-    put_entry  = None
+    if stop_flag.is_set():
+        algo_state["running"] = False
+        return
 
+    entry_prices = {}
+    for leg in LEGS:
+        symbol = legs[leg]["symbol"]
+        place_order(kite, exchange, symbol, qtys[leg], entry_txn[leg])
+        price = get_ltp(kite, exchange, symbol)
+        entry_prices[leg] = price
+        algo_state["legs"][leg]["entry"] = price
+        algo_state["legs"][leg]["current"] = price
+        log(f"[{leg}] {symbol} | Qty: {qtys[leg]} | Entry: ₹{price}")
+
+    log(">> ALL 4 LEGS ENTERED")
+
+    # ── Monitor loop ──
     while not stop_flag.is_set():
         try:
             if not is_market_open():
                 time.sleep(60)
                 continue
 
-            ce_candles = get_candles_zk(kite, CE_TOKEN, ZK_TF)
-            pe_candles = get_candles_zk(kite, PE_TOKEN, ZK_TF)
+            current_prices = {}
+            for leg in LEGS:
+                price = get_ltp(kite, exchange, legs[leg]["symbol"])
+                current_prices[leg] = price
+                algo_state["legs"][leg]["current"] = price
 
-            if not ce_candles or not pe_candles:
-                time.sleep(60)
-                continue
+            combined_loss = compute_combined_loss(entry_prices, current_prices, qtys)
+            algo_state["combined_loss"] = combined_loss
 
-            ce_df = add_ema(pd.DataFrame(ce_candles))
-            pe_df = add_ema(pd.DataFrame(pe_candles))
+            exit_reason = None
+            if should_exit(combined_loss, config.max_loss):
+                exit_reason = "MAX LOSS HIT"
+            elif is_eod():
+                exit_reason = "EOD"
 
-            current_candle_time = ce_df.iloc[-1]["date"]
+            if exit_reason:
+                for leg in LEGS:
+                    symbol = legs[leg]["symbol"]
+                    place_order(kite, exchange, symbol, qtys[leg], exit_txn[leg])
+                    log(f"[EXIT - {exit_reason}] {leg} {symbol} | Price: ₹{current_prices[leg]}")
 
-            if current_candle_time == last_seen_candle_time:
-                time.sleep(10)
-                continue
+                algo_state["pnl"] = -combined_loss
+                log(f"── Exit reason: {exit_reason} | Total PnL: ₹{-combined_loss:.2f} ──")
+                break
 
-            last_seen_candle_time = current_candle_time
-
-            ce_signal = bullish_crossover(ce_df)
-            pe_signal = bullish_crossover(pe_df)
-
-            if ce_signal and call_entry is None:
-                place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_BUY)
-                call_entry = ce_df.iloc[-2]["close"]
-                algo_state["call_entry"] = call_entry
-                log(f"[BUY - CE] {CALL_SYMBOL} | Qty: {QTY} | Price: ₹{call_entry}")
-
-            if pe_signal and put_entry is None:
-                place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_BUY)
-                put_entry = pe_df.iloc[-2]["close"]
-                algo_state["put_entry"] = put_entry
-                log(f"[BUY - PE] {PUT_SYMBOL} | Qty: {QTY} | Price: ₹{put_entry}")
-
-            while not stop_flag.is_set():
-                if not is_market_open():
-                    break
-
-                if is_eod():
-                    if call_entry is not None:
-                        eod_ltp = kite.ltp(f"BFO:{CALL_SYMBOL}")[f"BFO:{CALL_SYMBOL}"]["last_price"]
-                        place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
-                        pnl = (eod_ltp - call_entry) * QTY
-                        algo_state["pnl"] += pnl
-                        log(f"[SELL - EOD] {CALL_SYMBOL} | Price: ₹{eod_ltp} | PnL: ₹{pnl:.2f}")
-                        call_entry = None
-                        algo_state["call_entry"] = None
-                    if put_entry is not None:
-                        eod_ltp = kite.ltp(f"BFO:{PUT_SYMBOL}")[f"BFO:{PUT_SYMBOL}"]["last_price"]
-                        place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
-                        pnl = (eod_ltp - put_entry) * QTY
-                        algo_state["pnl"] += pnl
-                        log(f"[SELL - EOD] {PUT_SYMBOL} | Price: ₹{eod_ltp} | PnL: ₹{pnl:.2f}")
-                        put_entry = None
-                        algo_state["put_entry"] = None
-                    break
-
-                if call_entry is not None:
-                    call_ltp = kite.ltp(f"BFO:{CALL_SYMBOL}")[f"BFO:{CALL_SYMBOL}"]["last_price"]
-                    if call_ltp >= call_entry + config.profit_points:
-                        place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
-                        pnl = (call_ltp - call_entry) * QTY
-                        algo_state["pnl"] += pnl
-                        log(f"[SELL - TARGET] {CALL_SYMBOL} | Price: ₹{call_ltp} | PnL: ₹{pnl:.2f}")
-                        call_entry = None
-                        algo_state["call_entry"] = None
-                    elif call_ltp <= call_entry - config.stoploss_points:
-                        place_order(kite, CALL_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
-                        pnl = (call_ltp - call_entry) * QTY
-                        algo_state["pnl"] += pnl
-                        log(f"[SELL - STOPLOSS] {CALL_SYMBOL} | Price: ₹{call_ltp} | PnL: ₹{pnl:.2f}")
-                        call_entry = None
-                        algo_state["call_entry"] = None
-
-                if put_entry is not None:
-                    put_ltp = kite.ltp(f"BFO:{PUT_SYMBOL}")[f"BFO:{PUT_SYMBOL}"]["last_price"]
-                    if put_ltp >= put_entry + config.profit_points:
-                        place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
-                        pnl = (put_ltp - put_entry) * QTY
-                        algo_state["pnl"] += pnl
-                        log(f"[SELL - TARGET] {PUT_SYMBOL} | Price: ₹{put_ltp} | PnL: ₹{pnl:.2f}")
-                        put_entry = None
-                        algo_state["put_entry"] = None
-                    elif put_ltp <= put_entry - config.stoploss_points:
-                        place_order(kite, PUT_SYMBOL, QTY, kite.TRANSACTION_TYPE_SELL)
-                        pnl = (put_ltp - put_entry) * QTY
-                        algo_state["pnl"] += pnl
-                        log(f"[SELL - STOPLOSS] {PUT_SYMBOL} | Price: ₹{put_ltp} | PnL: ₹{pnl:.2f}")
-                        put_entry = None
-                        algo_state["put_entry"] = None
-
-                ce_candles_check = get_candles_zk(kite, CE_TOKEN, ZK_TF)
-                if ce_candles_check:
-                    new_time = pd.DataFrame(ce_candles_check).iloc[-1]["date"]
-                    if new_time != last_seen_candle_time:
-                        break
-
-                time.sleep(2)
+            time.sleep(5)
 
         except Exception as e:
             log(f"[ERROR] {e}")
@@ -325,14 +298,14 @@ def auth_status():
 def logout():
     stop_flag.set()
     log("User logged out. Algo stopped.")
-    algo_state["running"]      = False
-    algo_state["logged_in"]    = False
-    algo_state["user_name"]    = None
-    algo_state["access_token"] = None
-    algo_state["logs"]         = []
-    algo_state["pnl"]          = 0.0
-    algo_state["call_entry"]   = None
-    algo_state["put_entry"]    = None
+    algo_state["running"]       = False
+    algo_state["logged_in"]     = False
+    algo_state["user_name"]     = None
+    algo_state["access_token"]  = None
+    algo_state["logs"]          = []
+    algo_state["pnl"]           = 0.0
+    algo_state["legs"]          = {}
+    algo_state["combined_loss"] = 0.0
     return {"status": "logged out"}
 
 
@@ -347,13 +320,13 @@ def start_algo(config: AlgoConfig):
     if algo_state["running"]:
         return {"status": "already running"}
 
-    algo_state["dry_run"]    = config.dry_run
-    stop_flag                = threading.Event()
-    algo_state["running"]    = True
-    algo_state["logs"]       = []
-    algo_state["pnl"]        = 0.0
-    algo_state["call_entry"] = None
-    algo_state["put_entry"]  = None
+    algo_state["dry_run"]       = config.dry_run
+    stop_flag                   = threading.Event()
+    algo_state["running"]       = True
+    algo_state["logs"]          = []
+    algo_state["pnl"]           = 0.0
+    algo_state["legs"]          = {}
+    algo_state["combined_loss"] = 0.0
 
     algo_thread = threading.Thread(target=run_algo, args=(config,), daemon=True)
     algo_thread.start()
@@ -372,16 +345,13 @@ def stop_algo():
 @app.get("/status")
 def get_status():
     return {
-        "running":         algo_state["running"],
-        "call_symbol":     algo_state["call_symbol"],
-        "put_symbol":      algo_state["put_symbol"],
-        "call_entry":      algo_state["call_entry"],
-        "put_entry":       algo_state["put_entry"],
-        "qty":             algo_state["qty"],
-        "profit_points":   algo_state["profit_points"],
-        "stoploss_points": algo_state["stoploss_points"],
-        "expiry":          algo_state["expiry"],
-        "pnl":             algo_state["pnl"],
-        "dry_run":         algo_state["dry_run"],
-        "logs":            algo_state["logs"][-50:],
+        "running":       algo_state["running"],
+        "index":         algo_state["index"],
+        "expiry":        algo_state["expiry"],
+        "max_loss":      algo_state["max_loss"],
+        "combined_loss": algo_state["combined_loss"],
+        "legs":          algo_state["legs"],
+        "pnl":           algo_state["pnl"],
+        "dry_run":       algo_state["dry_run"],
+        "logs":          algo_state["logs"][-50:],
     }

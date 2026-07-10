@@ -1,32 +1,51 @@
 # inputs.py
 
+SELL_LOT_MULTIPLIER = 3  # sell CE/PE lots = 3x the buy lots
+
+
 def get_user_inputs():
-    print("\n Sensex Options EMA Algo Setup \n")
+    print("\n=== Multi-Leg Options Algo Setup ===\n")
 
-    call_strike = int(input("Enter CALL strike (e.g., 78000): "))
-    put_strike = int(input("Enter PUT strike (e.g., 77000): "))
-    lots = int(input("Enter number of lots: "))
-    profit_points = int(input("Enter profit points (e.g., 50): "))
-    stoploss_points = int(input("Enter stoploss points (e.g., 30): "))
-    timeframe = input("Enter timeframe (3m / 5m / 15m): ").strip()
+    index = input("Select index (SENSEX / NIFTY): ").strip().upper()
+    if index not in ["SENSEX", "NIFTY"]:
+        raise ValueError("Index must be SENSEX or NIFTY")
 
-    LOT_SIZE = 20  # Sensex lot size
+    expiry = input("Enter expiry date (YYYY-MM-DD, must be a currently-listed expiry): ").strip()
+    if not expiry:
+        raise ValueError("Expiry is required")
 
-    if timeframe not in ["3m", "5m", "15m"]:
-        raise ValueError("Timeframe must be '3m', '5m' or '15m'")
+    print(f"\nEnter strikes for {index}:")
+    buy_strike = int(input("  Strike for BUY CE + BUY PE (straddle leg): "))
+    sell_ce_strike = int(input("  Strike for SELL CE: "))
+    sell_pe_strike = int(input("  Strike for SELL PE: "))
 
-    if lots <= 0:
-        raise ValueError("Lots must be >= 1")
+    buy_lots = int(input("\nEnter number of lots for the BUY legs (CE + PE): "))
+    sell_lots = buy_lots * SELL_LOT_MULTIPLIER
+    print(f"  -> SELL CE and SELL PE lots set to {sell_lots} ({SELL_LOT_MULTIPLIER}x buy lots)")
 
-    if profit_points <= 0 or stoploss_points <= 0:
-        raise ValueError("Profit/Stoploss must be positive")
+    # Exchange lot sizes are revised periodically, so we ask rather than
+    # hardcode a value that could go stale.
+    lot_size = int(input(f"Enter {index} lot size (confirm current value on exchange): "))
+
+    max_loss = float(input("Enter max combined loss in rupees (exit trigger for all 4 legs): "))
+
+    if buy_lots <= 0:
+        raise ValueError("Buy lots must be >= 1")
+
+    if lot_size <= 0:
+        raise ValueError("Lot size must be >= 1")
+
+    if max_loss <= 0:
+        raise ValueError("Max loss must be positive")
 
     return {
-        "CALL_STRIKE": call_strike,
-        "PUT_STRIKE": put_strike,
-        "LOTS": lots,
-        "LOT_SIZE": LOT_SIZE,
-        "PROFIT_POINTS": profit_points,
-        "STOPLOSS_POINTS": stoploss_points,
-        "TIMEFRAME": timeframe
+        "INDEX": index,
+        "EXPIRY": expiry,
+        "BUY_STRIKE": buy_strike,
+        "SELL_CE_STRIKE": sell_ce_strike,
+        "SELL_PE_STRIKE": sell_pe_strike,
+        "BUY_LOTS": buy_lots,
+        "SELL_LOTS": sell_lots,
+        "LOT_SIZE": lot_size,
+        "MAX_LOSS": max_loss,
     }
