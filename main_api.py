@@ -7,9 +7,9 @@ Auth model: this server holds the Zerodha session, not the browser.
   1. Dashboard calls GET /api/zerodha-login-url and redirects the user
      there -- that's Zerodha's own login page, so the user's password
      never touches this server or the browser's JS.
-  2. Zerodha redirects back to GET /zerodha-callback?request_token=...
-     (register this exact URL -- http(s)://<your-host>/zerodha-callback
-     -- as the redirect URL in your Kite Connect app settings).
+  2. Zerodha redirects back to GET /callback?request_token=...
+     (this must exactly match the redirect URL registered in your Kite
+     Connect app settings -- e.g. https://sensexalgo.onrender.com/callback)
   3. That handler exchanges request_token for an access_token via
      kite.generate_session() and keeps it in memory for the life of the
      process. GET /api/auth-status tells the dashboard whether that
@@ -82,8 +82,9 @@ def zerodha_login_url():
     return {"url": kite.login_url()}
 
 
-@app.get("/zerodha-callback")
-def zerodha_callback(request_token: str, status: Optional[str] = None):
+@app.get("/callback")
+def zerodha_callback(request_token: str, status: Optional[str] = None,
+                      action: Optional[str] = None, type: Optional[str] = None):
     """Zerodha redirects the user's browser here after login. This is a
     browser navigation, not a fetch() call from dashboard.html, so it's
     exempt from CORS -- just make sure this exact path is registered as
