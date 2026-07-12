@@ -44,10 +44,11 @@ INDEX_EXCHANGE = {
 }
 
 
-def resolve_multi_leg_symbols(kite, index, expiry_str, buy_strike, sell_ce_strike, sell_pe_strike):
+def resolve_multi_leg_symbols(kite, index, expiry_str, buy_ce_strike, buy_pe_strike, sell_ce_strike, sell_pe_strike):
     """
     Resolve tradingsymbols/tokens for the 4-leg structure:
-      BUY_CE, BUY_PE   @ buy_strike
+      BUY_CE           @ buy_ce_strike
+      BUY_PE           @ buy_pe_strike
       SELL_CE          @ sell_ce_strike
       SELL_PE          @ sell_pe_strike
     for an EXACT user-specified expiry (not "nearest") on the correct exchange.
@@ -84,8 +85,8 @@ def resolve_multi_leg_symbols(kite, index, expiry_str, buy_strike, sell_ce_strik
             )
         return row.iloc[0]
 
-    buy_ce_row  = find_row(buy_strike, "CE")
-    buy_pe_row  = find_row(buy_strike, "PE")
+    buy_ce_row  = find_row(buy_ce_strike, "CE")
+    buy_pe_row  = find_row(buy_pe_strike, "PE")
     sell_ce_row = find_row(sell_ce_strike, "CE")
     sell_pe_row = find_row(sell_pe_strike, "PE")
 

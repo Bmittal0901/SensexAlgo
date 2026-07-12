@@ -76,7 +76,8 @@ user = get_user_inputs()
 
 INDEX          = user["INDEX"]
 EXPIRY         = user["EXPIRY"]
-BUY_STRIKE     = user["BUY_STRIKE"]
+BUY_CE_STRIKE  = user["BUY_CE_STRIKE"]
+BUY_PE_STRIKE  = user["BUY_PE_STRIKE"]
 SELL_CE_STRIKE = user["SELL_CE_STRIKE"]
 SELL_PE_STRIKE = user["SELL_PE_STRIKE"]
 BUY_LOTS       = user["BUY_LOTS"]
@@ -107,7 +108,7 @@ EXIT_TXN = {
 
 # ---------------- Resolve contracts ----------------
 legs, EXCHANGE = resolve_multi_leg_symbols(
-    kite, INDEX, EXPIRY, BUY_STRIKE, SELL_CE_STRIKE, SELL_PE_STRIKE
+    kite, INDEX, EXPIRY, BUY_CE_STRIKE, BUY_PE_STRIKE, SELL_CE_STRIKE, SELL_PE_STRIKE
 )
 
 print("\nResolved contracts:")

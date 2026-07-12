@@ -243,12 +243,12 @@
         <input type="date" id="expiry"/>
       </div>
       <div class="form-group">
-        <label>Buy Strike (CE+PE)</label>
-        <input type="number" id="buy_strike" placeholder="e.g. 82500"/>
+        <label>Buy CE Strike</label>
+        <input type="number" id="buy_ce_strike" placeholder="e.g. 82500"/>
       </div>
       <div class="form-group">
-        <label>Lot Size</label>
-        <input type="number" id="lot_size" placeholder="e.g. 20" min="1"/>
+        <label>Buy PE Strike</label>
+        <input type="number" id="buy_pe_strike" placeholder="e.g. 82500"/>
       </div>
       <div class="form-group">
         <label>Sell CE Strike</label>
@@ -261,6 +261,10 @@
     </div>
     <div class="section-label">Strategy Parameters</div>
     <div class="form-grid" style="margin-bottom:20px">
+      <div class="form-group">
+        <label>Lot Size</label>
+        <input type="number" id="lot_size" placeholder="e.g. 20" min="1"/>
+      </div>
       <div class="form-group">
         <label>Buy Lots</label>
         <input type="number" id="buy_lots" value="1" min="1"/>
@@ -501,7 +505,8 @@
     const config = {
       index:          document.getElementById("index").value,
       expiry:         document.getElementById("expiry").value,
-      buy_strike:     parseInt(document.getElementById("buy_strike").value),
+      buy_ce_strike:  parseInt(document.getElementById("buy_ce_strike").value),
+      buy_pe_strike:  parseInt(document.getElementById("buy_pe_strike").value),
       sell_ce_strike: parseInt(document.getElementById("sell_ce_strike").value),
       sell_pe_strike: parseInt(document.getElementById("sell_pe_strike").value),
       buy_lots:       parseInt(document.getElementById("buy_lots").value),
@@ -511,7 +516,8 @@
     };
 
     if (!config.expiry)                { err.textContent = "Expiry date is required."; return; }
-    if (!config.buy_strike)            { err.textContent = "Buy strike is required."; return; }
+    if (!config.buy_ce_strike)         { err.textContent = "Buy CE strike is required."; return; }
+    if (!config.buy_pe_strike)         { err.textContent = "Buy PE strike is required."; return; }
     if (!config.sell_ce_strike)        { err.textContent = "Sell CE strike is required."; return; }
     if (!config.sell_pe_strike)        { err.textContent = "Sell PE strike is required."; return; }
     if (config.buy_lots < 1)           { err.textContent = "Buy lots must be at least 1."; return; }

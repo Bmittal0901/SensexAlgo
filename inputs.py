@@ -15,7 +15,8 @@ def get_user_inputs():
         raise ValueError("Expiry is required")
 
     print(f"\nEnter strikes for {index}:")
-    buy_strike = int(input("  Strike for BUY CE + BUY PE (straddle leg): "))
+    buy_ce_strike = int(input("  Strike for BUY CE: "))
+    buy_pe_strike = int(input("  Strike for BUY PE: "))
     sell_ce_strike = int(input("  Strike for SELL CE: "))
     sell_pe_strike = int(input("  Strike for SELL PE: "))
 
@@ -41,7 +42,8 @@ def get_user_inputs():
     return {
         "INDEX": index,
         "EXPIRY": expiry,
-        "BUY_STRIKE": buy_strike,
+        "BUY_CE_STRIKE": buy_ce_strike,
+        "BUY_PE_STRIKE": buy_pe_strike,
         "SELL_CE_STRIKE": sell_ce_strike,
         "SELL_PE_STRIKE": sell_pe_strike,
         "BUY_LOTS": buy_lots,
