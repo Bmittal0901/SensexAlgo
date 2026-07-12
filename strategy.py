@@ -56,3 +56,25 @@ def should_exit(combined_loss, max_loss):
         True if combined_loss >= max_loss
     """
     return combined_loss >= max_loss
+
+
+# ---------------- Optional per-leg SL / target ----------------
+#
+# These are opt-in. If per_leg_stop_loss / per_leg_target are left as None
+# (the default in bot_engine.py), the strategy behaves exactly as before:
+# only the combined-loss threshold or a manual stop triggers an exit.
+
+def leg_hit_stop_loss(direction, entry_price, current_price, qty, per_leg_stop_loss):
+    """True if this single leg's own loss (in rupees) has reached per_leg_stop_loss."""
+    if per_leg_stop_loss is None:
+        return False
+    leg_loss = leg_loss_per_unit(direction, entry_price, current_price) * qty
+    return leg_loss >= per_leg_stop_loss
+
+
+def leg_hit_target(direction, entry_price, current_price, qty, per_leg_target):
+    """True if this single leg's own profit (in rupees) has reached per_leg_target."""
+    if per_leg_target is None:
+        return False
+    leg_profit = -leg_loss_per_unit(direction, entry_price, current_price) * qty
+    return leg_profit >= per_leg_target
