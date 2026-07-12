@@ -30,7 +30,7 @@ IST = pytz.timezone("Asia/Kolkata")
 LEGS = ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"]
 SELL_LOT_MULTIPLIER = 3  # kept in sync with inputs.py
 ORDER_RETRY_COUNT = 3
-ORDER_STATUS_TIMEOUT = 20
+ORDER_STATUS_TIMEOUT = 5
 
 def env_dry_run() -> bool:
     """DRY_RUN is now an env var (e.g. Heroku config var / .env entry)
@@ -488,4 +488,5 @@ class TradingBot:
                 print("All positions exited successfully.")
                 return
             
-            time.sleep(5)
+            if self._manual_stop.wait(timeout=5):
+                continue
