@@ -3,23 +3,37 @@
 FastAPI service for the dashboard / remote control. This is what the
 Procfile's `uvicorn main_api:app` actually runs.
 
-No blocking input() calls anywhere in this module -- the access token and
-all trade parameters arrive in the POST /api/start request body instead
-of being typed at a terminal. All order-placing logic lives in
-bot_engine.TradingBot, shared with main.py, so this file is just the
-HTTP surface on top of it.
+Auth model: this server holds the Zerodha session, not the browser.
+  1. Dashboard calls GET /api/zerodha-login-url and redirects the user
+     there -- that's Zerodha's own login page, so the user's password
+     never touches this server or the browser's JS.
+  2. Zerodha redirects back to GET /zerodha-callback?request_token=...
+     (register this exact URL -- http(s)://<your-host>/zerodha-callback
+     -- as the redirect URL in your Kite Connect app settings).
+  3. That handler exchanges request_token for an access_token via
+     kite.generate_session() and keeps it in memory for the life of the
+     process. GET /api/auth-status tells the dashboard whether that
+     session exists; POST /api/logout drops it.
+  4. POST /api/start no longer takes access_token in the body -- it
+     just uses whatever session is currently held.
+
+Kite access tokens expire daily, so you'll need to log in again each
+morning; there's no refresh-token flow in Kite Connect.
 
 Run locally:
     uvicorn main_api:app --reload
 """
+import os
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
+from kiteconnect import KiteConnect
 from pydantic import BaseModel, Field
 
 from bot_engine import TradingBot, env_dry_run
-from zerodha_client import get_kite
+from zerodha_config import API_KEY, API_SECRET
 
 app = FastAPI(title="SensexAlgo API")
 
@@ -31,12 +45,88 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_DASHBOARD_PATH = os.path.join(os.path.dirname(__file__), "dashboard.html")
+
+# ---------------- session state (single-user, in-memory) ----------------
+_access_token: Optional[str] = None
+_user_name: Optional[str] = None
+
 _bot: Optional[TradingBot] = None
 _RUNNING_STATES = {"resolving", "waiting_for_market", "entering", "monitoring"}
 
 
+def _get_authed_kite() -> KiteConnect:
+    if not _access_token:
+        raise HTTPException(401, "Not logged in. Log in with Zerodha first.")
+    kite = KiteConnect(api_key=API_KEY)
+    kite.set_access_token(_access_token)
+    return kite
+
+
+@app.get("/")
+def dashboard():
+    """Serves dashboard.html itself."""
+    return FileResponse(_DASHBOARD_PATH)
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+# ---------------- Zerodha login ----------------
+
+@app.get("/api/zerodha-login-url")
+def zerodha_login_url():
+    kite = KiteConnect(api_key=API_KEY)
+    return {"url": kite.login_url()}
+
+
+@app.get("/zerodha-callback")
+def zerodha_callback(request_token: str, status: Optional[str] = None):
+    """Zerodha redirects the user's browser here after login. This is a
+    browser navigation, not a fetch() call from dashboard.html, so it's
+    exempt from CORS -- just make sure this exact path is registered as
+    the redirect URL in your Kite Connect app settings."""
+    global _access_token, _user_name
+
+    if status == "cancelled":
+        return RedirectResponse(url="/")
+
+    kite = KiteConnect(api_key=API_KEY)
+    try:
+        session_data = kite.generate_session(request_token, api_secret=API_SECRET)
+    except Exception as e:
+        raise HTTPException(400, f"Zerodha login failed: {e}")
+
+    _access_token = session_data["access_token"]
+    kite.set_access_token(_access_token)
+    try:
+        _user_name = kite.profile().get("user_name")
+    except Exception:
+        _user_name = None
+
+    return RedirectResponse(url="/")
+
+
+@app.get("/api/auth-status")
+def auth_status():
+    if not _access_token:
+        return {"logged_in": False}
+    return {"logged_in": True, "user_name": _user_name}
+
+
+@app.post("/api/logout")
+def logout():
+    global _access_token, _user_name
+    _access_token = None
+    _user_name = None
+    return {"message": "Logged out."}
+
+
+# ---------------- bot control ----------------
+
 class StartRequest(BaseModel):
-    access_token: str
     index: str = Field(pattern="^(SENSEX|NIFTY)$")
     expiry: str  # YYYY-MM-DD, must be a currently-listed expiry
     buy_ce_strike: int
@@ -52,11 +142,6 @@ class StartRequest(BaseModel):
     dry_run: Optional[bool] = None  # omit to fall back to the DRY_RUN env var
 
 
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
-
-
 @app.post("/api/start")
 def start(req: StartRequest):
     global _bot
@@ -64,10 +149,7 @@ def start(req: StartRequest):
     if _bot is not None and _bot.status in _RUNNING_STATES:
         raise HTTPException(400, "A session is already running. Stop it before starting a new one.")
 
-    try:
-        kite = get_kite(req.access_token)
-    except Exception as e:
-        raise HTTPException(400, f"Could not initialize Zerodha session: {e}")
+    kite = _get_authed_kite()
 
     config = {
         "index": req.index,

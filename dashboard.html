@@ -211,6 +211,7 @@
         <div class="step-text">You'll be <strong>automatically redirected</strong> back to start the algo</div>
       </div>
     </div>
+    <div class="error-msg" id="loginError"></div>
     <button class="login-btn" onclick="loginWithZerodha()">LOGIN WITH ZERODHA</button>
     <div class="login-note">Your credentials are entered directly on Zerodha's secure website.<br>We never see your password.</div>
   </div>
@@ -390,12 +391,40 @@
 </div>
 
 <script>
-  const API = window.location.origin;
+  // main_api.py mounts every route under /api (see @app.get("/api/health") etc.)
+  const API = window.location.origin + "/api";
+
+  // Mirrors _RUNNING_STATES in main_api.py
+  const RUNNING_STATES = ["resolving", "waiting_for_market", "entering", "monitoring"];
+  const STATUS_LABELS = {
+    idle: "IDLE", resolving: "RESOLVING", waiting_for_market: "WAITING FOR MARKET",
+    entering: "ENTERING", monitoring: "MONITORING", exited: "EXITED", error: "ERROR",
+  };
+
   let pollInterval = null;
-  let lastLogCount = 0;
   let dryRun = true;
   let stopping = false;
-  let lastConfig = null;
+  let lastConfig = null;   // holds the last config posted to /api/start (no token in it -- server holds the session)
+
+  // The API has no /logs endpoint (snapshot() doesn't return one), so the
+  // log panel is built client-side from status transitions we observe while polling.
+  let logLines = [];
+  let lastSeenStatus = null;
+  let lastSeenExitReason = null;
+  let lastSeenError = null;
+
+  function pushLog(line, cls) {
+    const t = new Date().toLocaleTimeString("en-IN", {timeZone: "Asia/Kolkata", hour12: false});
+    logLines.push({line, cls, t});
+    if (logLines.length > 200) logLines.shift();
+  }
+
+  function resetLogs() {
+    logLines = [];
+    lastSeenStatus = null;
+    lastSeenExitReason = null;
+    lastSeenError = null;
+  }
 
   // Clock
   function updateClock() {
@@ -426,7 +455,8 @@
     document.getElementById("screen" + n).classList.add("active");
   }
 
-  // Init
+  // Init — checks the server-side session (GET /api/auth-status), then
+  // whether a bot is already running (GET /api/status).
   async function init() {
     applyTheme();
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -437,11 +467,12 @@
           goToScreen(1);
           return;
         }
-        document.getElementById("userName").textContent = authData.user_name;
+        document.getElementById("userName").textContent = authData.user_name || "Connected";
+
         const statusRes  = await fetch(`${API}/status`);
         const statusData = await statusRes.json();
-        if (statusData.running) {
-          document.getElementById("dryBadge").classList.toggle("on", statusData.dry_run);
+        if (RUNNING_STATES.includes(statusData.status)) {
+          document.getElementById("dryBadge").classList.toggle("on", !!statusData.dry_run);
           goToScreen(3);
           startPolling();
         } else {
@@ -458,14 +489,18 @@
     }
   }
 
-  // Zerodha login
+  // Zerodha login — redirects to Zerodha's own login page. Zerodha then
+  // redirects back to the server's /zerodha-callback, which exchanges the
+  // request_token for an access_token and holds it server-side.
   async function loginWithZerodha() {
+    const err = document.getElementById("loginError");
+    err.textContent = "";
     try {
       const res  = await fetch(`${API}/zerodha-login-url`);
       const data = await res.json();
       window.location.href = data.url;
     } catch(e) {
-      alert("Cannot connect to server. Is uvicorn running?");
+      err.textContent = "Cannot connect to server. Is uvicorn running?";
     }
   }
 
@@ -540,16 +575,17 @@
       });
       const data = await res.json();
 
-      if (data.status === "started" || data.status === "already running") {
+      if (res.ok) {
         document.getElementById("dryBadge").classList.toggle("on", dryRun);
         stopping = false;
+        resetLogs();
         goToScreen(3);
-        lastLogCount = 0;
         startPolling();
         btn.disabled = false;
         btn.innerHTML = "LAUNCH ALGO";
       } else {
-        err.textContent = data.message || "Failed to start algo.";
+        // FastAPI validation/HTTPException errors come back as {"detail": ...}
+        err.textContent = (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) || "Failed to start algo.";
         btn.disabled = false;
         btn.innerHTML = "LAUNCH ALGO";
       }
@@ -567,11 +603,22 @@
     btn.textContent = "STOPPING...";
     stopping = true;
     try {
-      await fetch(`${API}/stop`, {method:"POST"});
-    } catch(e) {}
+      const res = await fetch(`${API}/stop`, {method:"POST"});
+      if (!res.ok) {
+        const data = await res.json();
+        alert((typeof data.detail === "string" ? data.detail : null) || "Failed to stop algo.");
+        btn.disabled = false;
+        btn.textContent = "STOP ALGO";
+        stopping = false;
+      }
+    } catch(e) {
+      btn.disabled = false;
+      btn.textContent = "STOP ALGO";
+      stopping = false;
+    }
   }
 
-  // Restart algo with same config
+  // Restart algo with same config (no token in it -- the server's session is reused)
   async function restartAlgo() {
     if (!lastConfig) {
       alert("No previous config found. Please go back to setup.");
@@ -587,11 +634,12 @@
         body: JSON.stringify(lastConfig),
       });
       const data = await res.json();
-      if (data.status === "started" || data.status === "already running") {
+      if (res.ok) {
+        resetLogs();
         btn.disabled = false;
         btn.textContent = "RESTART";
       } else {
-        alert(data.message || "Failed to start algo.");
+        alert((typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) || "Failed to start algo.");
         btn.disabled = false;
         btn.textContent = "RESTART";
       }
@@ -617,14 +665,34 @@
     } catch(e) {}
   }
 
+  // data here is exactly bot.snapshot() from bot_engine.py (or {status:"idle"}
+  // if no bot has been created yet) — see main_api.py's GET /api/status.
   function updateDashboard(data) {
     const dot     = document.getElementById("statusDot");
     const lbl     = document.getElementById("statusText");
     const stopBtn = document.getElementById("stopBtn");
+    const running = RUNNING_STATES.includes(data.status);
 
-    if (data.running) {
+    if (data.status !== lastSeenStatus) {
+      pushLog(`Status -> ${STATUS_LABELS[data.status] || data.status}`, "def");
+      lastSeenStatus = data.status;
+    }
+    if (data.exit_reason && data.exit_reason !== lastSeenExitReason) {
+      const pnlTxt = "₹" + Number(data.total_pnl || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});
+      let cls = "def";
+      if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
+      else if (data.exit_reason.includes("EOD")) cls = "eod";
+      pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);
+      lastSeenExitReason = data.exit_reason;
+    }
+    if (data.error_message && data.error_message !== lastSeenError) {
+      pushLog(`[ERROR] ${data.error_message}`, "error");
+      lastSeenError = data.error_message;
+    }
+
+    if (running) {
       dot.classList.add("on");
-      lbl.textContent = "RUNNING";
+      lbl.textContent = STATUS_LABELS[data.status] || data.status.toUpperCase();
       lbl.classList.add("on");
       if (!stopping) {
         stopBtn.disabled = false;
@@ -632,15 +700,17 @@
       }
     } else {
       dot.classList.remove("on");
-      lbl.textContent = "STOPPED";
+      lbl.textContent = STATUS_LABELS[data.status] || (data.status || "STOPPED").toUpperCase();
       lbl.classList.remove("on");
       stopBtn.disabled = true;
       stopBtn.textContent = "STOP ALGO";
       stopping = false;
     }
 
-    document.getElementById("indexVal").textContent  = data.index  || "--";
-    document.getElementById("expiryVal").textContent = data.expiry || "--";
+    // index/expiry aren't part of snapshot() — main_api.py never echoes the
+    // config back — so pull them from the config we last posted instead.
+    document.getElementById("indexVal").textContent  = (lastConfig && lastConfig.index)  || "--";
+    document.getElementById("expiryVal").textContent = (lastConfig && lastConfig.expiry) || "--";
     document.getElementById("maxLossVal").textContent =
       data.max_loss != null ? "₹" + Number(data.max_loss).toLocaleString("en-IN") : "--";
 
@@ -649,32 +719,31 @@
     clEl.textContent = "₹" + combinedLoss.toLocaleString("en-IN", {minimumFractionDigits:2});
     clEl.style.color = combinedLoss > 0 ? "var(--red)" : combinedLoss < 0 ? "var(--green)" : "";
 
-    const pnl   = data.pnl || 0;
+    const pnl   = data.total_pnl || 0;
     const pnlEl = document.getElementById("pnlVal");
     pnlEl.textContent = "₹" + pnl.toLocaleString("en-IN", {minimumFractionDigits:2});
     pnlEl.className   = "pnl-val" + (pnl > 0 ? " pos" : pnl < 0 ? " neg" : "");
 
-    const legs = data.legs || {};
-    ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"].forEach(leg => updateCard(leg, legs[leg]));
+    // snapshot() keeps legs/qtys/entry_prices/current_prices as separate
+    // dicts keyed by leg name — stitch them back into one object per leg.
+    ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"].forEach(leg => {
+      const legInfo = data.legs && data.legs[leg];
+      const info = legInfo ? {
+        symbol:  legInfo.symbol,
+        qty:     data.qtys ? data.qtys[leg] : null,
+        entry:   data.entry_prices ? data.entry_prices[leg] : null,
+        current: data.current_prices ? data.current_prices[leg] : null,
+      } : null;
+      updateCard(leg, info);
+    });
 
-    const logs = data.logs || [];
-    document.getElementById("logCount").textContent = logs.length + " entries";
-    if (logs.length !== lastLogCount) {
-      lastLogCount = logs.length;
-      const box = document.getElementById("logBox");
-      if (!logs.length) {
-        box.innerHTML = '<span class="log-empty">No logs yet...</span>';
-      } else {
-        box.innerHTML = logs.map(line => {
-          let cls = "def";
-          if      (line.includes("ALL 4 LEGS ENTERED") || line.includes("[BUY_") || line.includes("[SELL_")) cls = "buy";
-          else if (line.includes("MAX LOSS HIT"))    cls = "sl";
-          else if (line.includes("EXIT - EOD"))      cls = "eod";
-          else if (line.includes("[ERROR]"))         cls = "error";
-          return `<span class="log-line ${cls}">${line}</span>`;
-        }).join("\n");
-        box.scrollTop = box.scrollHeight;
-      }
+    document.getElementById("logCount").textContent = logLines.length + " entries";
+    const box = document.getElementById("logBox");
+    if (!logLines.length) {
+      box.innerHTML = '<span class="log-empty">No logs yet...</span>';
+    } else {
+      box.innerHTML = logLines.map(l => `<span class="log-line ${l.cls}">[${l.t}] ${l.line}</span>`).join("\n");
+      box.scrollTop = box.scrollHeight;
     }
   }
 
