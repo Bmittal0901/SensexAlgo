@@ -340,11 +340,10 @@
         <div class="chip">Index <span id="indexVal">--</span></div>
         <div class="chip">Expiry <span id="expiryVal">--</span></div>
         <div class="chip">Max Loss <span id="maxLossVal">--</span></div>
-        <div class="chip">Combined Loss <span id="combinedLossVal">--</span></div>
       </div>
       <div class="pnl-block">
-        <div class="pnl-lbl">Total P&L</div>
-        <div class="pnl-val" id="pnlVal">₹0.00</div>
+        <div class="pnl-lbl">COMBINED LOSS</div>
+        <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
       </div>
       <button class="stop-btn" id="stopBtn" onclick="stopAlgo()">STOP ALGO</button>
       <button class="restart-btn" id="restartBtn" onclick="restartAlgo()">RESTART</button>
@@ -694,11 +693,11 @@
       lastSeenStatus = data.status;
     }
     if (data.exit_reason && data.exit_reason !== lastSeenExitReason) {
-      const pnlTxt = "₹" + Number(data.total_pnl || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});
-      let cls = "def";
+    const pnlTxt = "₹" + Number(data.combined_loss || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});     
+    let cls = "def";
       if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
       else if (data.exit_reason.includes("EOD")) cls = "eod";
-      pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);
+      pushLog(`EXIT — ${data.exit_reason} | Combined Loss ${pnlTxt}`, cls);     
       lastSeenExitReason = data.exit_reason;
     }
     if (data.error_message && data.error_message !== lastSeenError) {
@@ -730,15 +729,20 @@
     document.getElementById("maxLossVal").textContent =
       data.max_loss != null ? "₹" + Number(data.max_loss).toLocaleString("en-IN") : "--";
 
-    const combinedLoss = data.combined_loss || 0;
-    const clEl = document.getElementById("combinedLossVal");
-    clEl.textContent = "₹" + combinedLoss.toLocaleString("en-IN", {minimumFractionDigits:2});
-    clEl.style.color = combinedLoss > 0 ? "var(--red)" : combinedLoss < 0 ? "var(--green)" : "";
+    const combinedLossDisplay = document.getElementById("combinedLossDisplay");
 
-    const pnl   = data.total_pnl || 0;
-    const pnlEl = document.getElementById("pnlVal");
-    pnlEl.textContent = "₹" + pnl.toLocaleString("en-IN", {minimumFractionDigits:2});
-    pnlEl.className   = "pnl-val" + (pnl > 0 ? " pos" : pnl < 0 ? " neg" : "");
+    combinedLossDisplay.textContent =
+        "₹" + Number(data.combined_loss || 0).toLocaleString("en-IN", {
+            minimumFractionDigits: 2
+        });
+
+    if ((data.combined_loss || 0) > 0) {
+        combinedLossDisplay.style.color = "var(--red)";
+    } else if ((data.combined_loss || 0) < 0) {
+        combinedLossDisplay.style.color = "var(--green)";
+    } else {
+        combinedLossDisplay.style.color = "var(--muted)";
+    }
 
     // snapshot() keeps legs/qtys/entry_prices/current_prices as separate
     // dicts keyed by leg name — stitch them back into one object per leg.
