@@ -264,7 +264,7 @@
     <div class="form-grid" style="margin-bottom:20px">
       <div class="form-group">
         <label>Lot Size</label>
-        <input type="number" id="lot_size" placeholder="e.g. 20" min="1"/>
+          <input type="number" id="lot_size" readonly />
       </div>
       <div class="form-group">
         <label>Buy Lots</label>
@@ -289,11 +289,29 @@
     </div>
     <div class="error-msg" id="setupError"></div>
     <button class="btn-primary" id="setupBtn" onclick="handleSetup()">LAUNCH ALGO</button>
+ <button class="btn-primary" id="setupBtn" onclick="handleSetup()">LAUNCH ALGO</button>
+
     <script>
+      function updateLotSize() {
+        const index = document.getElementById("index").value;
+        const lotInput = document.getElementById("lot_size");
+
+        if (index === "SENSEX") {
+          lotInput.value = 20;
+        } else if (index === "NIFTY") {
+          lotInput.value = 65;
+        }
+      }
+
       document.getElementById("buy_lots").addEventListener("input", function() {
         const v = parseInt(this.value) || 0;
         document.getElementById("sell_lots_display").value = v * 3;
       });
+
+      document.getElementById("index").addEventListener("change", updateLotSize);
+
+      // Set default value when the page loads
+      updateLotSize();
     </script>
   </div>
 </div>

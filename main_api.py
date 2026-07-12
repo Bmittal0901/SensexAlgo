@@ -135,7 +135,6 @@ class StartRequest(BaseModel):
     sell_ce_strike: int
     sell_pe_strike: int
     buy_lots: int = Field(gt=0)
-    lot_size: int = Field(gt=0)
     max_loss: float = Field(gt=0)
     per_leg_stop_loss: Optional[float] = None
     per_leg_target: Optional[float] = None
@@ -151,7 +150,7 @@ def start(req: StartRequest):
         raise HTTPException(400, "A session is already running. Stop it before starting a new one.")
 
     kite = _get_authed_kite()
-
+    lot_size = 20 if req.index == "SENSEX" else 65
     config = {
         "index": req.index,
         "expiry": req.expiry,
@@ -160,7 +159,7 @@ def start(req: StartRequest):
         "sell_ce_strike": req.sell_ce_strike,
         "sell_pe_strike": req.sell_pe_strike,
         "buy_lots": req.buy_lots,
-        "lot_size": req.lot_size,
+        "lot_size": lot_size,
         "max_loss": req.max_loss,
         "per_leg_stop_loss": req.per_leg_stop_loss,
         "per_leg_target": req.per_leg_target,
