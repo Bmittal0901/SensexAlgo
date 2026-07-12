@@ -29,7 +29,8 @@ from utils import resolve_multi_leg_symbols
 IST = pytz.timezone("Asia/Kolkata")
 LEGS = ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"]
 SELL_LOT_MULTIPLIER = 3  # kept in sync with inputs.py
-
+ORDER_RETRY_COUNT = 3
+ORDER_STATUS_TIMEOUT = 20
 
 def env_dry_run() -> bool:
     """DRY_RUN is now an env var (e.g. Heroku config var / .env entry)
@@ -164,6 +165,100 @@ class TradingBot:
             print(f"[ORDER FAILED] {action} {symbol} | Error: {e}")
             return None
 
+    def _wait_for_order_completion(self, order_id, timeout=ORDER_STATUS_TIMEOUT):
+        """Wait until Zerodha reports the order as COMPLETE.
+        Returns True if filled, False if rejected/cancelled/timeout."""
+
+        if self.dry_run:
+            return True
+
+        start = time.time()
+
+        while time.time() - start < timeout:
+            try:
+                orders = self.kite.orders()
+
+                for order in orders:
+                    if order["order_id"] == order_id:
+
+                        status = order["status"]
+
+                        if status == "COMPLETE":
+                            return True
+
+                        if status in ("REJECTED", "CANCELLED"):
+                            print(f"[EXIT FAILED] Order {order_id} : {status}")
+                            return False
+
+                time.sleep(1)
+
+            except Exception as e:
+                print(f"Error checking order status: {e}")
+                time.sleep(1)
+
+        print(f"[TIMEOUT] Order {order_id} not completed.")
+        return False
+
+
+    def _exit_leg(self, symbol, qty, transaction_type,retries=ORDER_RETRY_COUNT):
+        """
+        Exit one leg with retry logic.
+        """
+
+        for attempt in range(1, retries + 1):
+
+            print(f"Exiting {symbol} (Attempt {attempt}/{retries})")
+
+            order_id = self._place_order(symbol, qty, transaction_type)
+
+            if not order_id:
+                continue
+
+            if self._wait_for_order_completion(order_id):
+                print(f"{symbol} exited successfully.")
+                return True
+
+            print(f"Retrying {symbol}...")
+
+        print(f"Failed to exit {symbol}.")
+        return False
+
+
+    def _verify_all_positions_closed(self):
+        """
+        Final safety check.
+        """
+
+        if self.dry_run:
+            return True
+
+        try:
+            positions = self.kite.positions()["net"]
+
+            open_positions = [
+                p for p in positions
+                if p["quantity"] != 0
+            ]
+
+            if open_positions:
+                print("\n========== WARNING ==========")
+
+                for p in open_positions:
+                    print(
+                        f"{p['tradingsymbol']} "
+                        f"Qty={p['quantity']}"
+                    )
+
+                print("=============================\n")
+
+                return False
+
+            return True
+
+        except Exception as e:
+            print(f"Unable to verify positions: {e}")
+            return False
+
     def _run(self):
         cfg = self.config
         self._set(status="resolving", started_at=datetime.now(IST).isoformat(), error_message=None)
@@ -203,10 +298,93 @@ class TradingBot:
         # ---------------- Entry: all 4 legs ----------------
         self._set(status="entering")
         entry_prices = {}
+        entered_legs = []
         for leg in LEGS:
+
             symbol = legs[leg]["symbol"]
-            self._place_order(symbol, qtys[leg], entry_txn[leg])
+
+            order_id = self._place_order(
+                symbol,
+                qtys[leg],
+                entry_txn[leg]
+            )
+
+            if not order_id:
+
+                print("\nENTRY FAILED")
+                print("Rolling back previously entered positions...")
+                rollback_failed = []
+
+                for entered_leg in reversed(entered_legs):
+
+                    success=self._exit_leg(
+                        legs[entered_leg]["symbol"],
+                        qtys[entered_leg],
+                        exit_txn[entered_leg],
+                        retries=ORDER_RETRY_COUNT
+                    )
+                    if not success:
+                        rollback_failed.append(legs[entered_leg]["symbol"])
+
+                if rollback_failed:
+                    self._set(
+                        status="error",
+                        error_message=(
+                            f"Failed to enter {leg}. "
+                            f"Rollback failed for: {rollback_failed}"
+                        ),
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+                else:
+                    self._set(
+                        status="error",
+                        error_message=f"Failed to enter {leg}. Previous entries rolled back.",
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+                return
+
+            if not self._wait_for_order_completion(order_id):
+
+                print("\nENTRY INCOMPLETE")
+                print("Rolling back previously entered positions...")
+
+                rollback_failed = []
+
+                for entered_leg in reversed(entered_legs):
+
+                    success = self._exit_leg(
+                        legs[entered_leg]["symbol"],
+                        qtys[entered_leg],
+                        exit_txn[entered_leg],
+                        retries=ORDER_RETRY_COUNT
+                    )
+
+                    if not success:
+                        rollback_failed.append(legs[entered_leg]["symbol"])
+
+                if rollback_failed:
+
+                    self._set(
+                        status="error",
+                        error_message=(
+                            f"{leg} entry failed and rollback was incomplete. "
+                            f"Open positions may remain: {rollback_failed}"
+                        ),
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+
+                else:
+
+                    self._set(
+                        status="error",
+                        error_message=f"{leg} entry was not completed. Previous entries rolled back.",
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+
+                return
+
             entry_prices[leg] = self._get_ltp(symbol)
+            entered_legs.append(leg)
         self._set(status="monitoring", entry_prices=entry_prices, current_prices=dict(entry_prices))
 
         # ---------------- Monitor ----------------
@@ -255,11 +433,59 @@ class TradingBot:
                     exit_reason = "EOD SQUARE-OFF"
 
             if exit_reason:
-                for leg in LEGS:
-                    self._place_order(legs[leg]["symbol"], qtys[leg], exit_txn[leg])
-                total_pnl = -compute_combined_loss(entry_prices, last_known_prices, qtys)
-                self._set(status="exited", exit_reason=exit_reason, total_pnl=total_pnl,
-                          ended_at=datetime.now(IST).isoformat())
-                return
 
+                failed_legs = []
+
+                print(f"\n===== EXIT : {exit_reason} =====")
+
+                for leg in LEGS:
+
+                    success = self._exit_leg(
+                        legs[leg]["symbol"],
+                        qtys[leg],
+                        exit_txn[leg],
+                        retries=ORDER_RETRY_COUNT
+                    )
+
+                    if not success:
+                        failed_legs.append(legs[leg]["symbol"])
+                time.sleep(2)  # give Zerodha a moment to update positions before final check
+                positions_closed = self._verify_all_positions_closed()
+
+                total_pnl = -compute_combined_loss(
+                    entry_prices,
+                    last_known_prices,
+                    qtys
+                )
+
+                if failed_legs or not positions_closed:
+
+                    self._set(
+                        status="error",
+                        exit_reason=exit_reason,
+                        total_pnl=total_pnl,
+                        error_message=(
+                            f"Some positions could not be closed. "
+                            f"Failed legs: {failed_legs}"
+                        ),
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+
+                    print("\n***************")
+                    print("MANUAL ACTION REQUIRED")
+                    print("Check Zerodha positions immediately.")
+                    print("***************\n")
+
+                    return
+
+                self._set(
+                    status="exited",
+                    exit_reason=exit_reason,
+                    total_pnl=total_pnl,
+                    ended_at=datetime.now(IST).isoformat()
+                )
+
+                print("All positions exited successfully.")
+                return
+            
             time.sleep(5)
