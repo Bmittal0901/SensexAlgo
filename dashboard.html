@@ -301,10 +301,10 @@
         }
       }
 
-      document.getElementById("buy_lots").addEventListener("input", function() {
-        const v = parseInt(this.value) || 0;
-        document.getElementById("sell_lots_display").value = v * 3;
-      });
+      // document.getElementById("buy_lots").addEventListener("input", function() {
+      //   const v = parseInt(this.value) || 0;
+      //   document.getElementById("sell_lots_display").value = v * 3;
+      // });
 
       document.getElementById("index").addEventListener("change", updateLotSize);
 
@@ -565,14 +565,50 @@
       dry_run:        dryRun,
     };
 
-    if (!config.expiry)                { err.textContent = "Expiry date is required."; return; }
-    if (!config.buy_ce_strike)         { err.textContent = "Buy CE strike is required."; return; }
-    if (!config.buy_pe_strike)         { err.textContent = "Buy PE strike is required."; return; }
-    if (!config.sell_ce_strike)        { err.textContent = "Sell CE strike is required."; return; }
-    if (!config.sell_pe_strike)        { err.textContent = "Sell PE strike is required."; return; }
-    if (config.buy_lots < 1)           { err.textContent = "Buy lots must be at least 1."; return; }
-    if (!config.lot_size || config.lot_size < 1) { err.textContent = "Lot size must be positive."; return; }
-    if (!config.max_loss || config.max_loss < 1) { err.textContent = "Max loss must be positive."; return; }
+    if (!config.expiry) {
+    err.textContent = "Expiry date is required.";
+    return;
+}
+
+if (
+    !config.buy_ce_strike &&
+    !config.buy_pe_strike &&
+    !config.sell_ce_strike &&
+    !config.sell_pe_strike
+) {
+    err.textContent = "Please enter at least one strike.";
+    return;
+}
+
+const legs = [
+    ["BUY CE", config.buy_ce_strike, config.buy_ce_lots],
+    ["BUY PE", config.buy_pe_strike, config.buy_pe_lots],
+    ["SELL CE", config.sell_ce_strike, config.sell_ce_lots],
+    ["SELL PE", config.sell_pe_strike, config.sell_pe_lots],
+];
+
+for (const [name, strike, lots] of legs) {
+
+    if (strike && lots <= 0) {
+        err.textContent = `${name} lots must be greater than 0.`;
+        return;
+    }
+
+    if (!strike && lots > 0) {
+        err.textContent = `${name} strike is required.`;
+        return;
+    }
+}
+
+if (!config.lot_size || config.lot_size < 1) {
+    err.textContent = "Lot size must be positive.";
+    return;
+}
+
+if (!config.max_loss || config.max_loss < 1) {
+    err.textContent = "Max loss must be positive.";
+    return;
+}
 
     if (!dryRun) {
       if (!confirm("⚠️ LIVE MODE: Real orders will be placed on Zerodha. Are you sure?")) return;

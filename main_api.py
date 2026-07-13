@@ -126,21 +126,28 @@ def logout():
 
 
 # ---------------- bot control ----------------
-
 class StartRequest(BaseModel):
     index: str = Field(pattern="^(SENSEX|NIFTY)$")
-    expiry: str  # YYYY-MM-DD, must be a currently-listed expiry
-    from typing import Optional
+    expiry: str
+
     buy_ce_strike: Optional[int] = None
     buy_pe_strike: Optional[int] = None
     sell_ce_strike: Optional[int] = None
     sell_pe_strike: Optional[int] = None
-    buy_lots: int = Field(gt=0)
+
+    buy_ce_lots: int = 0
+    buy_pe_lots: int = 0
+    sell_ce_lots: int = 0
+    sell_pe_lots: int = 0
+
     max_loss: float = Field(gt=0)
+
     per_leg_stop_loss: Optional[float] = None
     per_leg_target: Optional[float] = None
+
     square_off_time: str = "15:20"
-    dry_run: Optional[bool] = None  # omit to fall back to the DRY_RUN env var
+
+    dry_run: Optional[bool] = None
 
 
 @app.post("/api/start")
@@ -159,7 +166,10 @@ def start(req: StartRequest):
         "buy_pe_strike": req.buy_pe_strike,
         "sell_ce_strike": req.sell_ce_strike,
         "sell_pe_strike": req.sell_pe_strike,
-        "buy_lots": req.buy_lots,
+        "buy_ce_lots": req.buy_ce_lots,
+        "buy_pe_lots": req.buy_pe_lots,
+        "sell_ce_lots": req.sell_ce_lots,
+        "sell_pe_lots": req.sell_pe_lots,
         "lot_size": lot_size,
         "max_loss": req.max_loss,
         "per_leg_stop_loss": req.per_leg_stop_loss,

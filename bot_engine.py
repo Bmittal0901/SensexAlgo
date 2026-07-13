@@ -41,22 +41,6 @@ def env_dry_run() -> bool:
     deliberately opt into live orders."""
     return os.getenv("DRY_RUN", "true").strip().lower() not in ("0", "false", "no")
 
-selected = sum(
-    x is not None
-    for x in [
-        req.buy_ce_strike,
-        req.buy_pe_strike,
-        req.sell_ce_strike,
-        req.sell_pe_strike,
-    ]
-)
-
-if selected == 0:
-    raise HTTPException(
-        status_code=400,
-        detail="Please enter at least one strike."
-    )
-
 class TradingBot:
     """
     Runs one 4-leg session: resolve contracts -> wait for market open ->
@@ -337,16 +321,20 @@ class TradingBot:
             self._set(status="error", error_message=str(e), ended_at=datetime.now(IST).isoformat())
             return
 
-        buy_qty = cfg["buy_lots"] * cfg["lot_size"]
-        sell_qty = cfg["buy_lots"] * SELL_LOT_MULTIPLIER * cfg["lot_size"]
+        lot_size = cfg["lot_size"]
         qtys = {}
 
-        for leg in active_legs:
+        if "BUY_CE" in legs:
+            qtys["BUY_CE"] = cfg["buy_ce_lots"] * lot_size
 
-            if leg.startswith("BUY"):
-                qtys[leg] = buy_qty
-            else:
-                qtys[leg] = sell_qty
+        if "BUY_PE" in legs:
+            qtys["BUY_PE"] = cfg["buy_pe_lots"] * lot_size
+
+        if "SELL_CE" in legs:
+            qtys["SELL_CE"] = cfg["sell_ce_lots"] * lot_size
+
+        if "SELL_PE" in legs:
+            qtys["SELL_PE"] = cfg["sell_pe_lots"] * lot_size
         entry_txn = {
             leg: (self.kite.TRANSACTION_TYPE_BUY if d == "BUY" else self.kite.TRANSACTION_TYPE_SELL)
             for leg, d in LEG_DIRECTIONS.items()
@@ -471,7 +459,7 @@ class TradingBot:
                 continue
             else:
                 try:
-                    current_prices = {leg: self._get_ltp(legs[leg]["symbol"]) for leg in LEGS}
+                    current_prices = {leg: self._get_ltp(legs[leg]["symbol"]) for leg in active_legs}
                     last_known_prices = current_prices
                 except Exception as e:
                     self._set(error_message=f"Price fetch error: {e}")
