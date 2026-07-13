@@ -162,7 +162,18 @@ class TradingBot:
             print(f"[ORDER PLACED] {action} {qty} x {symbol} | Order ID: {order_id} | Time: {exec_time}")
             return order_id
         except Exception as e:
-            print(f"[ORDER FAILED] {action} {symbol} | Error: {e}")
+            import traceback
+
+            error = f"{type(e).__name__}: {e}"
+
+            print("=" * 80)
+            print(f"[ORDER FAILED] {action} {qty} x {symbol}")
+            print(error)
+            traceback.print_exc()
+            print("=" * 80)
+
+            self._set(error_message=error)
+
             return None
 
     def _wait_for_order_completion(self, order_id, timeout=ORDER_STATUS_TIMEOUT):
@@ -337,9 +348,9 @@ class TradingBot:
                     )
                 else:
                     self._set(
-                        status="error",
-                        error_message=f"Failed to enter {leg}. Previous entries rolled back.",
-                        ended_at=datetime.now(IST).isoformat()
+                    status="error",
+                    error_message=f"{leg} failed: {self.error_message}",
+                    ended_at=datetime.now(IST).isoformat()
                     )
                 return
 
@@ -376,9 +387,9 @@ class TradingBot:
                 else:
 
                     self._set(
-                        status="error",
-                        error_message=f"{leg} entry was not completed. Previous entries rolled back.",
-                        ended_at=datetime.now(IST).isoformat()
+                    status="error",
+                    error_message=f"{leg} failed: {self.error_message}",
+                    ended_at=datetime.now(IST).isoformat()
                     )
 
                 return
