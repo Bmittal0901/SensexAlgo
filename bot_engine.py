@@ -247,14 +247,28 @@ class TradingBot:
 
         try:
             positions = self.kite.positions()["net"]
+            print("\n========== POSITIONS FROM API ==========")
 
-            open_positions = [
-                p for p in positions
-                if p["quantity"] != 0
-            ]
+            open_positions = []
+
+            for p in positions:
+
+                print(
+                    f"{p['tradingsymbol']} | "
+                    f"qty={p['quantity']} | "
+                    f"day_buy={p['day_buy_quantity']} | "
+                    f"day_sell={p['day_sell_quantity']} |"
+                    f"product={p['product']} | "
+                    f"exchange={p['exchange']}"
+                )
+
+                if p["quantity"] != 0:
+                    open_positions.append(p)
+            print("========================================")
+
 
             if open_positions:
-                print("\n========== WARNING ==========")
+                print("\n========== OPEN POSITIONS ==========")
 
                 for p in open_positions:
                     print(
@@ -265,7 +279,7 @@ class TradingBot:
                 print("=============================\n")
 
                 return False
-
+            print("All positions are closed.\n")
             return True
 
         except Exception as e:
