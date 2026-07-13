@@ -31,6 +31,8 @@ LEGS = ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"]
 SELL_LOT_MULTIPLIER = 3  # kept in sync with inputs.py
 ORDER_RETRY_COUNT = 3
 ORDER_STATUS_TIMEOUT = 5
+POSITION_VERIFY_RETRIES = 4  # Zerodha's aggregate positions feed can lag
+POSITION_VERIFY_DELAY = 3    # a few seconds behind the order book after a burst of fills
 
 def env_dry_run() -> bool:
     """DRY_RUN is now an env var (e.g. Heroku config var / .env entry)
@@ -237,13 +239,18 @@ class TradingBot:
         return False
 
 
-    def _verify_all_positions_closed(self):
+    def _verify_all_positions_closed(self, symbols=None):
         """
-        Final safety check.
+        Final safety check -- only looks at the tradingsymbols THIS session
+        actually traded. Other positions already open in the account (a
+        different strategy, a manual trade, an overnight NRML carry) are
+        none of this session's business and shouldn't flag a false error.
         """
 
         if self.dry_run:
             return True
+
+        symbols = set(symbols or [])
 
         try:
             positions = self.kite.positions()["net"]
@@ -252,6 +259,8 @@ class TradingBot:
             open_positions = []
 
             for p in positions:
+                if symbols and p["tradingsymbol"] not in symbols:
+                    continue  # not one of this session's legs -- ignore
 
                 print(
                     f"{p['tradingsymbol']} | "
@@ -279,7 +288,7 @@ class TradingBot:
                 print("=============================\n")
 
                 return False
-            print("All positions are closed.\n")
+            print("All positions are closed (for this session's legs).\n")
             return True
 
         except Exception as e:
@@ -462,31 +471,23 @@ class TradingBot:
             if exit_reason:
 
                 failed_legs = []
+                exit_symbols = []
 
                 print(f"\n===== EXIT : {exit_reason} =====")
 
                 for leg in LEGS:
+                    symbol = legs[leg]["symbol"]
+                    exit_symbols.append(symbol)
 
                     success = self._exit_leg(
-                        legs[leg]["symbol"],
+                        symbol,
                         qtys[leg],
                         exit_txn[leg],
                         retries=ORDER_RETRY_COUNT
                     )
 
                     if not success:
-                        failed_legs.append(legs[leg]["symbol"])
-                # Give Zerodha time to update positions after exit orders
-                time.sleep(2)
-
-                positions_closed = self._verify_all_positions_closed()
-
-                # Retry once because Zerodha may take a couple of seconds
-                # to update positions after exit orders are COMPLETE.
-                if not positions_closed:
-                    print("Rechecking positions...")
-                    time.sleep(2)
-                    positions_closed = self._verify_all_positions_closed()
+                        failed_legs.append(symbol)
 
                 total_pnl = -compute_combined_loss(
                     entry_prices,
@@ -494,14 +495,8 @@ class TradingBot:
                     qtys
                 )
 
-                if failed_legs or not positions_closed:
-                    if failed_legs:
-                        message = f"Failed exit legs: {failed_legs}"
-                    else:
-                        message = (
-                         "Exit orders completed, but Zerodha still "
-                            "reported open positions during verification."
-                        )
+                if failed_legs:
+                    message = f"Failed exit legs: {failed_legs}"
 
                     self._set(
                         status="error",
@@ -514,6 +509,48 @@ class TradingBot:
                     print("\n***************")
                     print("MANUAL ACTION REQUIRED")
                     print(message)
+                    print("***************\n")
+
+                    return
+
+                # Every exit order above already confirmed COMPLETE
+                # individually via Zerodha's order book -- the authoritative
+                # source for "did this fill". We still cross-check the
+                # aggregate positions endpoint as a belt-and-braces sanity
+                # net, restricted to this session's own symbols (other
+                # positions already open in the account are none of this
+                # session's business), and give it a few retries since that
+                # feed is known to lag a few seconds behind the order book.
+                positions_closed = False
+                for attempt in range(1, POSITION_VERIFY_RETRIES + 1):
+                    time.sleep(POSITION_VERIFY_DELAY)
+                    positions_closed = self._verify_all_positions_closed(symbols=exit_symbols)
+                    if positions_closed:
+                        break
+                    print(f"Rechecking positions... (attempt {attempt}/{POSITION_VERIFY_RETRIES})")
+
+                if not positions_closed:
+                    # Don't hard-error here -- every exit order already
+                    # confirmed COMPLETE. Surface it as a warning instead so
+                    # a transient lag in Zerodha's position feed doesn't
+                    # read as a stuck trade when the trade itself is fine.
+                    warning = (
+                        "All exit orders confirmed COMPLETE, but Zerodha's "
+                        "position feed hadn't caught up by the last check -- "
+                        "worth a quick manual glance at your Positions tab."
+                    )
+
+                    self._set(
+                        status="exited",
+                        exit_reason=exit_reason,
+                        total_pnl=total_pnl,
+                        error_message=warning,
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+
+                    print("\n***************")
+                    print("VERIFY MANUALLY (likely just feed lag)")
+                    print(warning)
                     print("***************\n")
 
                     return
