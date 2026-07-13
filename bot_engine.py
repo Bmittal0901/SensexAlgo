@@ -10,6 +10,7 @@ one place that places orders and checks exit conditions.
 TradingBot.run() has no input() calls and no reliance on globals, so it's
 safe to run on a background thread inside a web server.
 """
+from http.client import HTTPException
 import os
 import threading
 import time
@@ -27,7 +28,6 @@ from strategy import (
 from utils import resolve_multi_leg_symbols
 
 IST = pytz.timezone("Asia/Kolkata")
-LEGS = ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"]
 SELL_LOT_MULTIPLIER = 3  # kept in sync with inputs.py
 ORDER_RETRY_COUNT = 3
 ORDER_STATUS_TIMEOUT = 5
@@ -41,6 +41,21 @@ def env_dry_run() -> bool:
     deliberately opt into live orders."""
     return os.getenv("DRY_RUN", "true").strip().lower() not in ("0", "false", "no")
 
+selected = sum(
+    x is not None
+    for x in [
+        req.buy_ce_strike,
+        req.buy_pe_strike,
+        req.sell_ce_strike,
+        req.sell_pe_strike,
+    ]
+)
+
+if selected == 0:
+    raise HTTPException(
+        status_code=400,
+        detail="Please enter at least one strike."
+    )
 
 class TradingBot:
     """
@@ -297,6 +312,19 @@ class TradingBot:
 
     def _run(self):
         cfg = self.config
+        active_legs = []
+
+        if cfg["buy_ce_strike"] is not None:
+            active_legs.append("BUY_CE")
+
+        if cfg["buy_pe_strike"] is not None:
+            active_legs.append("BUY_PE")
+
+        if cfg["sell_ce_strike"] is not None:
+            active_legs.append("SELL_CE")
+
+        if cfg["sell_pe_strike"] is not None:
+            active_legs.append("SELL_PE")
         self._set(status="resolving", started_at=datetime.now(IST).isoformat(), error_message=None)
 
         try:
@@ -311,8 +339,14 @@ class TradingBot:
 
         buy_qty = cfg["buy_lots"] * cfg["lot_size"]
         sell_qty = cfg["buy_lots"] * SELL_LOT_MULTIPLIER * cfg["lot_size"]
-        qtys = {"BUY_CE": buy_qty, "BUY_PE": buy_qty, "SELL_CE": sell_qty, "SELL_PE": sell_qty}
+        qtys = {}
 
+        for leg in active_legs:
+
+            if leg.startswith("BUY"):
+                qtys[leg] = buy_qty
+            else:
+                qtys[leg] = sell_qty
         entry_txn = {
             leg: (self.kite.TRANSACTION_TYPE_BUY if d == "BUY" else self.kite.TRANSACTION_TYPE_SELL)
             for leg, d in LEG_DIRECTIONS.items()
@@ -335,7 +369,7 @@ class TradingBot:
         self._set(status="entering")
         entry_prices = {}
         entered_legs = []
-        for leg in LEGS:
+        for leg in active_legs:
 
             symbol = legs[leg]["symbol"]
 
@@ -450,7 +484,8 @@ class TradingBot:
                 # per_leg_target configured these never fire, so the original
                 # "combined loss threshold or manual stop only" behaviour is
                 # preserved by default.
-                for leg, direction in LEG_DIRECTIONS.items():
+                for leg in active_legs:
+                    direction = LEG_DIRECTIONS[leg]
                     if leg_hit_stop_loss(direction, entry_prices[leg], current_prices[leg],
                                          qtys[leg], self.per_leg_stop_loss):
                         leg_exit_flags[leg] = "PER-LEG STOP LOSS"
@@ -475,7 +510,7 @@ class TradingBot:
 
                 print(f"\n===== EXIT : {exit_reason} =====")
 
-                for leg in LEGS:
+                for leg in active_legs:
                     symbol = legs[leg]["symbol"]
                     exit_symbols.append(symbol)
 

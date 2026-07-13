@@ -32,16 +32,23 @@ def leg_loss_per_unit(direction, entry_price, current_price):
 
 def compute_combined_loss(entry_prices, current_prices, qtys, leg_directions=LEG_DIRECTIONS):
     """
-    entry_prices, current_prices: dict[leg_name -> price]
-    qtys: dict[leg_name -> quantity]  (buy legs and sell legs can differ)
-    leg_directions: dict[leg_name -> "BUY" | "SELL"]
-
-    Returns combined loss in rupees. Positive = net loss, negative = net profit.
+    Computes combined loss only for the legs that actually exist.
     """
+
     combined_loss = 0
-    for leg, direction in leg_directions.items():
-        per_unit_loss = leg_loss_per_unit(direction, entry_prices[leg], current_prices[leg])
+
+    for leg in entry_prices:
+
+        direction = leg_directions[leg]
+
+        per_unit_loss = leg_loss_per_unit(
+            direction,
+            entry_prices[leg],
+            current_prices[leg]
+        )
+
         combined_loss += per_unit_loss * qtys[leg]
+
     return combined_loss
 
 

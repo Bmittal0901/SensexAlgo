@@ -130,10 +130,11 @@ def logout():
 class StartRequest(BaseModel):
     index: str = Field(pattern="^(SENSEX|NIFTY)$")
     expiry: str  # YYYY-MM-DD, must be a currently-listed expiry
-    buy_ce_strike: int
-    buy_pe_strike: int
-    sell_ce_strike: int
-    sell_pe_strike: int
+    from typing import Optional
+    buy_ce_strike: Optional[int] = None
+    buy_pe_strike: Optional[int] = None
+    sell_ce_strike: Optional[int] = None
+    sell_pe_strike: Optional[int] = None
     buy_lots: int = Field(gt=0)
     max_loss: float = Field(gt=0)
     per_leg_stop_loss: Optional[float] = None
