@@ -158,6 +158,8 @@ class TradingBot:
                 quantity=qty,
                 product=self.kite.PRODUCT_MIS,
                 order_type=self.kite.ORDER_TYPE_MARKET,
+                market_protection=2,
+
             )
             print(f"[ORDER PLACED] {action} {qty} x {symbol} | Order ID: {order_id} | Time: {exec_time}")
             return order_id
