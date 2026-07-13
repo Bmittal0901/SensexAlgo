@@ -462,8 +462,17 @@ class TradingBot:
 
                     if not success:
                         failed_legs.append(legs[leg]["symbol"])
-                time.sleep(2)  # give Zerodha a moment to update positions before final check
+                # Give Zerodha time to update positions after exit orders
+                time.sleep(2)
+
                 positions_closed = self._verify_all_positions_closed()
+
+                # Retry once because Zerodha may take a couple of seconds
+                # to update positions after exit orders are COMPLETE.
+                if not positions_closed:
+                    print("Rechecking positions...")
+                    time.sleep(2)
+                    positions_closed = self._verify_all_positions_closed()
 
                 total_pnl = -compute_combined_loss(
                     entry_prices,
@@ -472,21 +481,25 @@ class TradingBot:
                 )
 
                 if failed_legs or not positions_closed:
+                    if failed_legs:
+                        message = f"Failed exit legs: {failed_legs}"
+                    else:
+                        message = (
+                         "Exit orders completed, but Zerodha still "
+                            "reported open positions during verification."
+                        )
 
                     self._set(
                         status="error",
                         exit_reason=exit_reason,
                         total_pnl=total_pnl,
-                        error_message=(
-                            f"Some positions could not be closed. "
-                            f"Failed legs: {failed_legs}"
-                        ),
+                        error_message=message,
                         ended_at=datetime.now(IST).isoformat()
                     )
 
                     print("\n***************")
                     print("MANUAL ACTION REQUIRED")
-                    print("Check Zerodha positions immediately.")
+                    print(message)
                     print("***************\n")
 
                     return
