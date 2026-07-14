@@ -762,11 +762,11 @@ if (!config.max_loss || config.max_loss < 1) {
       lastSeenStatus = data.status;
     }
     if (data.exit_reason && data.exit_reason !== lastSeenExitReason) {
-    const pnlTxt = "₹" + Number(data.combined_loss || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});     
+    const pnlTxt = "₹" + Number(data.total_pnl || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});     
     let cls = "def";
       if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
       else if (data.exit_reason.includes("EOD")) cls = "eod";
-      pushLog(`EXIT — ${data.exit_reason} | Combined Loss ${pnlTxt}`, cls);     
+      pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);     
       lastSeenExitReason = data.exit_reason;
     }
     if (data.error_message && data.error_message !== lastSeenError) {
@@ -810,14 +810,15 @@ else {
 
     const combinedLossDisplay = document.getElementById("combinedLossDisplay");
 
+    const combinedLoss = data.combined_loss || 0;
     combinedLossDisplay.textContent =
-        "₹" + Number(data.combined_loss || 0).toLocaleString("en-IN", {
+        "₹" + combinedLoss.toLocaleString("en-IN", {
             minimumFractionDigits: 2
         });
 
-    if ((data.combined_loss || 0) > 0) {
+    if (combinedLoss > 0) {
         combinedLossDisplay.style.color = "var(--red)";
-    } else if ((data.combined_loss || 0) < 0) {
+    } else if (combinedLoss < 0) {
         combinedLossDisplay.style.color = "var(--green)";
     } else {
         combinedLossDisplay.style.color = "var(--muted)";

@@ -44,99 +44,68 @@ INDEX_EXCHANGE = {
 }
 
 
-def resolve_multi_leg_symbols(
-    kite,
-    index,
-    expiry_str,
-    buy_ce_strike,
-    buy_pe_strike,
-    sell_ce_strike,
-    sell_pe_strike,
-):
+def resolve_multi_leg_symbols(kite, index, expiry_str, buy_ce_strike=None, buy_pe_strike=None,
+                               sell_ce_strike=None, sell_pe_strike=None):
     """
-    Resolve only the legs whose strikes are provided.
+    Resolve tradingsymbols/tokens for whichever of the 4 legs the user
+    actually entered a strike for:
+      BUY_CE           @ buy_ce_strike   (skipped if buy_ce_strike is None)
+      BUY_PE           @ buy_pe_strike   (skipped if buy_pe_strike is None)
+      SELL_CE          @ sell_ce_strike  (skipped if sell_ce_strike is None)
+      SELL_PE          @ sell_pe_strike  (skipped if sell_pe_strike is None)
+    for an EXACT user-specified expiry (not "nearest") on the correct exchange.
+    At least one strike must be given.
 
     Returns:
-        legs: {
-            "BUY_CE": {"symbol": ..., "token": ...},
-            ...
-        }
-        exchange
+      legs: dict[leg_name -> {"symbol": str, "token": int}]  -- only the
+            legs the user actually entered a strike for
+      exchange: str ("BFO" or "NFO")
     """
-
     if index not in INDEX_EXCHANGE:
-        raise ValueError(f"Unsupported index '{index}'.")
+        raise ValueError(f"Unsupported index '{index}'. Must be SENSEX or NIFTY.")
+
+    requested = {
+        "BUY_CE":  ("CE", buy_ce_strike),
+        "BUY_PE":  ("PE", buy_pe_strike),
+        "SELL_CE": ("CE", sell_ce_strike),
+        "SELL_PE": ("PE", sell_pe_strike),
+    }
+    active = {leg: (opt_type, strike) for leg, (opt_type, strike) in requested.items() if strike is not None}
+
+    if not active:
+        raise ValueError(
+            "No legs entered -- provide a strike for at least one of "
+            "buy_ce_strike / buy_pe_strike / sell_ce_strike / sell_pe_strike."
+        )
 
     exchange = INDEX_EXCHANGE[index]
 
     try:
         expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
     except ValueError:
-        raise ValueError("Expiry must be YYYY-MM-DD.")
+        raise ValueError(f"Expiry '{expiry_str}' is not in YYYY-MM-DD format.")
 
     instruments = pd.DataFrame(kite.instruments(exchange))
-
-    opts = instruments[
-        instruments["tradingsymbol"].str.startswith(index)
-    ]
-
-    opts = opts[
-        opts["expiry"] == expiry_date
-    ]
+    opts = instruments[instruments["tradingsymbol"].str.startswith(index)]
+    opts = opts[opts["expiry"] == expiry_date]
 
     if opts.empty:
         raise ValueError(
-            f"No {index} contracts found for expiry {expiry_str}."
+            f"No {index} instruments found for expiry {expiry_str} on {exchange}. "
+            f"Confirm this is a currently-listed expiry."
         )
 
     def find_row(strike, opt_type):
-
-        if strike is None:
-            return None
-
-        row = opts[
-            (opts["strike"] == strike) &
-            (opts["instrument_type"] == opt_type)
-        ]
-
+        row = opts[(opts["strike"] == strike) & (opts["instrument_type"] == opt_type)]
         if row.empty:
             raise ValueError(
-                f"Could not resolve {index} {strike} {opt_type}"
+                f"Could not resolve {index} {strike} {opt_type} for expiry {expiry_str}."
             )
-
         return row.iloc[0]
 
     legs = {}
-
-    buy_ce = find_row(buy_ce_strike, "CE")
-    if buy_ce is not None:
-        legs["BUY_CE"] = {
-            "symbol": buy_ce["tradingsymbol"],
-            "token": int(buy_ce["instrument_token"]),
-        }
-
-    buy_pe = find_row(buy_pe_strike, "PE")
-    if buy_pe is not None:
-        legs["BUY_PE"] = {
-            "symbol": buy_pe["tradingsymbol"],
-            "token": int(buy_pe["instrument_token"]),
-        }
-
-    sell_ce = find_row(sell_ce_strike, "CE")
-    if sell_ce is not None:
-        legs["SELL_CE"] = {
-            "symbol": sell_ce["tradingsymbol"],
-            "token": int(sell_ce["instrument_token"]),
-        }
-
-    sell_pe = find_row(sell_pe_strike, "PE")
-    if sell_pe is not None:
-        legs["SELL_PE"] = {
-            "symbol": sell_pe["tradingsymbol"],
-            "token": int(sell_pe["instrument_token"]),
-        }
-
-    if not legs:
-        raise ValueError("Please enter at least one strike.")
+    for leg, (opt_type, strike) in active.items():
+        row = find_row(strike, opt_type)
+        legs[leg] = {"symbol": row["tradingsymbol"], "token": int(row["instrument_token"])}
 
     return legs, exchange

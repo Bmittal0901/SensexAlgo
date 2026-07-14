@@ -129,6 +129,7 @@ def logout():
 class StartRequest(BaseModel):
     index: str = Field(pattern="^(SENSEX|NIFTY)$")
     expiry: str
+    # lot_size intentionally hardcoded below, not a request field -- confirmed correct as of now.
 
     buy_ce_strike: Optional[int] = None
     buy_pe_strike: Optional[int] = None
@@ -150,6 +151,32 @@ class StartRequest(BaseModel):
     dry_run: Optional[bool] = None
 
 
+_LEG_FIELDS = {
+    "BUY_CE":  ("buy_ce_strike", "buy_ce_lots"),
+    "BUY_PE":  ("buy_pe_strike", "buy_pe_lots"),
+    "SELL_CE": ("sell_ce_strike", "sell_ce_lots"),
+    "SELL_PE": ("sell_pe_strike", "sell_pe_lots"),
+}
+
+
+def _validate_legs(req: StartRequest):
+    active = []
+    for leg, (strike_field, lots_field) in _LEG_FIELDS.items():
+        strike = getattr(req, strike_field)
+        lots = getattr(req, lots_field)
+        if strike is None:
+            continue
+        if lots is None or lots <= 0:
+            raise HTTPException(400, f"{leg}: strike given but {lots_field} is missing or not positive.")
+        active.append(leg)
+    if not active:
+        raise HTTPException(
+            400,
+            "No legs entered -- provide a strike (and matching lot count) for at least one leg."
+        )
+    return active
+
+
 @app.post("/api/start")
 def start(req: StartRequest):
     global _bot
@@ -157,6 +184,7 @@ def start(req: StartRequest):
     if _bot is not None and _bot.status in _RUNNING_STATES:
         raise HTTPException(400, "A session is already running. Stop it before starting a new one.")
 
+    _validate_legs(req)
     kite = _get_authed_kite()
     lot_size = 20 if req.index == "SENSEX" else 65
     config = {

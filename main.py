@@ -4,8 +4,7 @@ Interactive CLI runner for local/manual testing.
 
 Uses the same TradingBot engine as main_api.py (see bot_engine.py), so
 there's no behavioural drift between "run it from the terminal" and
-"drive it from the dashboard" -- previously main.py and main_api.py were
-byte-for-byte identical copies that would inevitably diverge.
+"drive it from the dashboard".
 """
 import time
 
@@ -35,7 +34,10 @@ def main():
         "buy_pe_strike": user["BUY_PE_STRIKE"],
         "sell_ce_strike": user["SELL_CE_STRIKE"],
         "sell_pe_strike": user["SELL_PE_STRIKE"],
-        "buy_lots": user["BUY_LOTS"],
+        "buy_ce_lots": user["BUY_CE_LOTS"],
+        "buy_pe_lots": user["BUY_PE_LOTS"],
+        "sell_ce_lots": user["SELL_CE_LOTS"],
+        "sell_pe_lots": user["SELL_PE_LOTS"],
         "lot_size": user["LOT_SIZE"],
         "max_loss": user["MAX_LOSS"],
         "dry_run": dry_run,
@@ -51,16 +53,16 @@ def main():
             if snap["status"] != last_status:
                 print(f"[STATUS] {snap['status']}")
                 last_status = snap["status"]
-            if snap["status"] in ("exited", "error"):
+            if snap["status"] in ("exited", "error", "stopped"):
                 print(snap)
                 break
             time.sleep(5)
     except KeyboardInterrupt:
-        print("\nManual stop requested (Ctrl+C). Waiting for the bot to exit all legs...")
-        bot.request_stop()
+        print("\nManual exit requested (Ctrl+C). Exiting all active legs...")
+        bot.request_exit()
         while True:
             snap = bot.snapshot()
-            if snap["status"] in ("exited", "error"):
+            if snap["status"] in ("exited", "error", "stopped"):
                 print(snap)
                 break
             time.sleep(2)

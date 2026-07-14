@@ -10,12 +10,10 @@ one place that places orders and checks exit conditions.
 TradingBot.run() has no input() calls and no reliance on globals, so it's
 safe to run on a background thread inside a web server.
 """
-from http.client import HTTPException
 import os
 import threading
 import time
 from datetime import datetime
-
 import pytz
 
 from strategy import (
@@ -57,6 +55,9 @@ class TradingBot:
           square_off_time                                (optional, "HH:MM" IST, default "15:20")
           dry_run                                         (optional, defaults to env_dry_run())
         """
+        self.leg_info = {}
+        self.active_legs = []
+        self.realized_pnl = 0.0
         self.kite = kite
         self.config = config
         self.dry_run = config.get("dry_run")
@@ -93,6 +94,9 @@ class TradingBot:
     def start(self):
         if self._thread and self._thread.is_alive():
             raise RuntimeError("Bot is already running.")
+        self.realized_pnl = 0.0
+        self.leg_info = {}
+        self.active_legs = []
         self._manual_stop.clear()
         self._stop_only = False
         self._exit_requested = False
@@ -122,6 +126,7 @@ class TradingBot:
                 "dry_run": self.dry_run,
                 "exchange": self.exchange,
                 "legs": self.legs,
+                "active_legs": self.active_legs,
                 "qtys": self.qtys,
                 "entry_prices": self.entry_prices,
                 "current_prices": self.current_prices,
@@ -134,6 +139,144 @@ class TradingBot:
                 "ended_at": self.ended_at,
             }
 
+    def _sync_manual_position_changes(
+        self,
+        active_legs,
+        legs,
+        entry_prices,
+        current_prices,
+        qtys,
+        leg_exit_flags,
+    ):
+        """
+        Synchronize the bot with the actual open positions in Kite.
+
+        If the user manually closes any leg from Kite, remove that leg from
+        the bot so monitoring, P&L and exit logic stay correct.
+        """
+
+        if self.dry_run:
+            return active_legs
+
+        positions = self.kite.positions()["net"]
+
+        open_symbols = {
+            p["tradingsymbol"]
+            for p in positions
+            if (
+                p["exchange"] == self.exchange
+                and p["product"] == self.kite.PRODUCT_NRML
+                and p["quantity"] != 0
+            )
+        }
+        updated_active_legs = []
+
+        for leg in active_legs:
+
+            symbol = legs[leg]["symbol"]
+
+            if symbol in open_symbols:
+                updated_active_legs.append(leg)
+
+            else:
+
+                print(f"[MANUAL CLOSE DETECTED] {symbol}")
+
+                info = self.leg_info[leg]
+
+                exit_side = (
+                    self.kite.TRANSACTION_TYPE_SELL
+                    if info["direction"] == "BUY"
+                    else self.kite.TRANSACTION_TYPE_BUY
+                )
+
+                exit_price = self._find_manual_exit_trade(
+                    symbol,
+                    exit_side,
+                    info["entry_time"],
+                )
+
+                if exit_price is not None:
+
+                    if info["direction"] == "BUY":
+                        pnl = (exit_price - info["entry_price"]) * info["qty"]
+                    else:
+                        pnl = (info["entry_price"] - exit_price) * info["qty"]
+
+                    info["realized"] = True
+                    info["realized_pnl"] = pnl
+                    self.realized_pnl += pnl
+
+                    print(f"Realized P&L = {pnl:.2f}")
+                    print(
+                        f"{symbol} manually closed."
+                        f" Realized P&L = {pnl:.2f}"
+                    )
+
+                entry_prices.pop(leg, None)
+                qtys.pop(leg, None)
+                current_prices.pop(leg, None)
+                leg_exit_flags.pop(leg, None)
+                self.leg_info.pop(leg, None)
+
+        return updated_active_legs
+    
+    def _find_manual_exit_trade(
+        self,
+        symbol,
+        transaction_type,
+        entry_time,
+    ):
+        """
+        entry_time is a timezone-aware datetime (from datetime.now(IST)).
+        Kite's trade fill_timestamp can come back as a naive datetime or a
+        string depending on kiteconnect version, which would raise "can't
+        compare offset-naive and offset-aware datetimes" against entry_time
+        -- so both sides are normalized to naive IST before comparing.
+        """
+
+        def _to_naive(ts):
+            if isinstance(ts, str):
+                ts = datetime.fromisoformat(ts)
+            if ts.tzinfo is not None:
+                ts = ts.astimezone(IST).replace(tzinfo=None)
+            return ts
+
+        entry_time_naive = _to_naive(entry_time)
+
+        trades = self.kite.trades()
+
+        candidates = []
+
+        for trade in trades:
+
+            if trade["tradingsymbol"] != symbol:
+                continue
+
+            if trade["transaction_type"] != transaction_type:
+                continue
+
+            try:
+                trade_time = _to_naive(trade["fill_timestamp"])
+            except Exception:
+                continue
+
+            if trade_time <= entry_time_naive:
+                continue
+
+            candidates.append(trade)
+
+        if not candidates:
+            return None
+
+        qty = sum(t["quantity"] for t in candidates)
+
+        value = sum(
+            t["quantity"] * float(t["average_price"])
+            for t in candidates
+        )
+
+        return value / qty
     # ---------------- internals ----------------
 
     def _set(self, **kwargs):
@@ -153,10 +296,6 @@ class TradingBot:
         now = datetime.now(IST)
         hh, mm = (int(x) for x in self.square_off_time.split(":"))
         return now >= now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-
-    def _get_ltp(self, symbol):
-        key = f"{self.exchange}:{symbol}"
-        return self.kite.ltp(key)[key]["last_price"]
 
     def _place_order(self, symbol, qty, transaction_type):
         exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
@@ -194,38 +333,42 @@ class TradingBot:
             self._set(error_message=error)
 
             return None
+    
+    def _get_ltp(self, symbol):
+        key = f"{self.exchange}:{symbol}"
+        return self.kite.ltp(key)[key]["last_price"]
 
-    def _wait_for_order_completion(self, order_id, timeout=ORDER_STATUS_TIMEOUT):
+    def _wait_for_order_completion(self, order_id, timeout=ORDER_STATUS_TIMEOUT, dry_run_symbol=None):
         """Wait until Zerodha reports the order as COMPLETE.
-        Returns True if filled, False if rejected/cancelled/timeout."""
+        Returns the average fill price (float) if filled, False if
+        rejected/cancelled/timeout.
 
+        In dry run there's no real order to poll, so this fetches a live
+        LTP for dry_run_symbol when given, to keep paper P&L realistic
+        instead of a fixed placeholder; falls back to 100.0 only if that
+        LTP fetch itself fails."""
         if self.dry_run:
-            return True
-
+            if dry_run_symbol:
+                try:
+                    return self._get_ltp(dry_run_symbol)
+                except Exception:
+                    pass
+            return 100.0
         start = time.time()
-
         while time.time() - start < timeout:
             try:
-                orders = self.kite.orders()
-
-                for order in orders:
-                    if order["order_id"] == order_id:
-
-                        status = order["status"]
-
-                        if status == "COMPLETE":
-                            return True
-
-                        if status in ("REJECTED", "CANCELLED"):
-                            print(f"[EXIT FAILED] Order {order_id} : {status}")
-                            return False
-
+                history = self.kite.order_history(order_id)
+                last = history[-1]
+                status = last["status"]
+                if status == "COMPLETE":
+                    return float(last["average_price"])
+                if status in ("REJECTED", "CANCELLED"):
+                    print(f"[ORDER FAILED] {order_id}: {status}")
+                    return False
                 time.sleep(1)
-
             except Exception as e:
                 print(f"Error checking order status: {e}")
                 time.sleep(1)
-
         print(f"[TIMEOUT] Order {order_id} not completed.")
         return False
 
@@ -244,7 +387,7 @@ class TradingBot:
             if not order_id:
                 continue
 
-            if self._wait_for_order_completion(order_id):
+            if self._wait_for_order_completion(order_id, dry_run_symbol=symbol) is not False:
                 print(f"{symbol} exited successfully.")
                 return True
 
@@ -430,7 +573,9 @@ class TradingBot:
                     )
                 return
 
-            if not self._wait_for_order_completion(order_id):
+            avg_price = self._wait_for_order_completion(order_id, dry_run_symbol=symbol)
+
+            if avg_price is False:
 
                 print("\nENTRY INCOMPLETE")
                 print("Rolling back previously entered positions...")
@@ -454,10 +599,10 @@ class TradingBot:
                     self._set(
                         status="error",
                         error_message=(
-                            f"{leg} entry failed and rollback was incomplete. "
-                            f"Open positions may remain: {rollback_failed}"
+                        f"{leg} entry failed and rollback was incomplete. "
+                        f"Open positions may remain: {rollback_failed}"
                         ),
-                        ended_at=datetime.now(IST).isoformat()
+                    ended_at=datetime.now(IST).isoformat()
                     )
 
                 else:
@@ -466,16 +611,32 @@ class TradingBot:
                     status="error",
                     error_message=f"{leg} failed: {self.error_message}",
                     ended_at=datetime.now(IST).isoformat()
-                    )
+                )
 
                 return
 
-            entry_prices[leg] = self._get_ltp(symbol)
             entered_legs.append(leg)
-        self._set(status="monitoring", entry_prices=entry_prices, current_prices=dict(entry_prices))
-
-        # ---------------- Monitor ----------------
+            entry_prices[leg] = avg_price
+            self.leg_info[leg] = {
+                "symbol": symbol,
+                "entry_price": avg_price,
+                "qty": qtys[leg],
+                "direction": LEG_DIRECTIONS[leg],
+                "entry_time": datetime.now(IST),
+                "realized": False,
+                "realized_pnl": 0.0,
+            }
         leg_exit_flags = {}
+        self._set(
+            status="monitoring",
+            legs=legs,
+            qtys=qtys,
+            entry_prices=entry_prices,
+            current_prices=dict(entry_prices),
+            leg_exit_flags=leg_exit_flags,
+        )
+        self.active_legs = active_legs.copy()
+        # ---------------- Monitor ----------------
         last_known_prices = dict(entry_prices)
 
         while True:
@@ -484,6 +645,7 @@ class TradingBot:
             if self._manual_stop.is_set():
 
                 if self._stop_only:
+                    self.active_legs = []
                     self._set(
                         status="stopped",
                         exit_reason="ALGORITHM STOPPED",
@@ -502,19 +664,60 @@ class TradingBot:
 
             else:
                 try:
-                    current_prices = {
-                        leg: self._get_ltp(legs[leg]["symbol"])
-                        for leg in active_legs
-                }
-                    last_known_prices = current_prices
+                    previous_entry_prices = dict(entry_prices)
+                    previous_prices = dict(last_known_prices)
+                    previous_qtys = dict(qtys)
+                    active_legs = self._sync_manual_position_changes(
+                        active_legs,
+                        legs,
+                        entry_prices,
+                        last_known_prices,
+                        qtys,
+                        leg_exit_flags,
+                    )
+                    self.active_legs = active_legs.copy()
+                    if not active_legs:
+                        total_pnl = (-compute_combined_loss(
+                        previous_entry_prices,
+                        previous_prices,
+                        previous_qtys,
+                        )+self.realized_pnl)
 
+                        self.active_legs = []
+
+                        self._set(
+                            status="exited",
+                            exit_reason="ALL POSITIONS CLOSED MANUALLY",
+                            total_pnl=total_pnl,
+                            ended_at=datetime.now(IST).isoformat()
+                        )
+                        print("All positions were manually closed.")
+
+                        return
+
+                    symbols = [
+                        f"{exchange}:{legs[leg]['symbol']}"
+                        for leg in active_legs
+                    ]
+
+                    ltp_data = self.kite.ltp(symbols)
+
+                    current_prices = {}
+
+                    for leg in active_legs:
+
+                        key = f"{exchange}:{legs[leg]['symbol']}"
+
+                        current_prices[leg] = ltp_data[key]["last_price"]
+
+                    last_known_prices = current_prices
                 except Exception as e:
                     self._set(error_message=f"Price fetch error: {e}")
                     time.sleep(10)
                     continue
 
                 combined_loss = compute_combined_loss(entry_prices, current_prices, qtys)
-
+                total_pnl = -combined_loss + self.realized_pnl
                 # Optional, opt-in per-leg checks. With no per_leg_stop_loss /
                 # per_leg_target configured these never fire, so the original
                 # "combined loss threshold or manual stop only" behaviour is
@@ -528,7 +731,9 @@ class TradingBot:
                                         qtys[leg], self.per_leg_target):
                         leg_exit_flags[leg] = "PER-LEG TARGET"
 
-                self._set(current_prices=current_prices, combined_loss=combined_loss,
+                self._set(current_prices=current_prices,
+                           combined_loss=combined_loss,
+                           total_pnl=total_pnl,
                           leg_exit_flags=dict(leg_exit_flags))
 
                 if should_exit(combined_loss, cfg["max_loss"]):
@@ -539,7 +744,6 @@ class TradingBot:
                     exit_reason = "EOD SQUARE-OFF"
 
             if exit_reason:
-
                 failed_legs = []
                 exit_symbols = []
 
@@ -559,11 +763,11 @@ class TradingBot:
                     if not success:
                         failed_legs.append(symbol)
 
-                total_pnl = -compute_combined_loss(
+                total_pnl = (-compute_combined_loss(
                     entry_prices,
                     last_known_prices,
                     qtys
-                )
+                )+self.realized_pnl)
 
                 if failed_legs:
                     message = f"Failed exit legs: {failed_legs}"
@@ -580,7 +784,7 @@ class TradingBot:
                     print("MANUAL ACTION REQUIRED")
                     print(message)
                     print("***************\n")
-
+                    self.active_legs = []
                     return
 
                 # Every exit order above already confirmed COMPLETE
@@ -622,7 +826,7 @@ class TradingBot:
                     print("VERIFY MANUALLY (likely just feed lag)")
                     print(warning)
                     print("***************\n")
-
+                    self.active_legs = []
                     return
 
                 self._set(
@@ -633,6 +837,7 @@ class TradingBot:
                 )
 
                 print("All positions exited successfully.")
+                self.active_legs = []
                 return
             
             if self._manual_stop.wait(timeout=2):
