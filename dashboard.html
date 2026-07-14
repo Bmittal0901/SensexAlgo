@@ -584,28 +584,25 @@ if (
     return;
 }
 
-const legs = [
-    ["BUY CE", config.buy_ce_strike, config.buy_ce_lots],
-    ["BUY PE", config.buy_pe_strike, config.buy_pe_lots],
-    ["SELL CE", config.sell_ce_strike, config.sell_ce_lots],
-    ["SELL PE", config.sell_pe_strike, config.sell_pe_lots],
-];
-
-for (const [name, strike, lots] of legs) {
-
-    if (strike && lots <= 0) {
-        err.textContent = `${name} lots must be greater than 0.`;
-        return;
-    }
-
-    if (!strike && lots > 0) {
-        err.textContent = `${name} strike is required.`;
-        return;
-    }
+// ---------- BUY ----------
+if ((config.buy_ce_strike || config.buy_pe_strike) && buyLots <= 0) {
+    err.textContent = "Buy lots must be greater than 0.";
+    return;
 }
 
-if (!config.lot_size || config.lot_size < 1) {
-    err.textContent = "Lot size must be positive.";
+if (!(config.buy_ce_strike || config.buy_pe_strike) && buyLots > 0) {
+    err.textContent = "Enter at least one BUY strike.";
+    return;
+}
+
+// ---------- SELL ----------
+if ((config.sell_ce_strike || config.sell_pe_strike) && sellLots <= 0) {
+    err.textContent = "Sell lots must be greater than 0.";
+    return;
+}
+
+if (!(config.sell_ce_strike || config.sell_pe_strike) && sellLots > 0) {
+    err.textContent = "Enter at least one SELL strike.";
     return;
 }
 
