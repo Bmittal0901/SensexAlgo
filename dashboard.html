@@ -559,8 +559,10 @@
       buy_pe_strike:  parseInt(document.getElementById("buy_pe_strike").value),
       sell_ce_strike: parseInt(document.getElementById("sell_ce_strike").value),
       sell_pe_strike: parseInt(document.getElementById("sell_pe_strike").value),
-      buy_lots:       parseInt(document.getElementById("buy_lots").value),
-      lot_size:       parseInt(document.getElementById("lot_size").value),
+      buy_ce_lots: buyLots,
+      buy_pe_lots: buyLots,
+      sell_ce_lots: sellLots,
+      sell_pe_lots: sellLots,
       max_loss:       parseFloat(document.getElementById("max_loss").value),
       dry_run:        dryRun,
     };
