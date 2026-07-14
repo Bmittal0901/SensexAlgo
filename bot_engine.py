@@ -588,5 +588,5 @@ class TradingBot:
                 print("All positions exited successfully.")
                 return
             
-            if self._manual_stop.wait(timeout=5):
+            if self._manual_stop.wait(timeout=2):
                 continue
