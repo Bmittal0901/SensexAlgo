@@ -71,6 +71,9 @@ class TradingBot:
         self._manual_stop = threading.Event()
         self._thread = None
 
+        self._stop_only = False
+        self._exit_requested = False
+
         self.status = "idle"
         self.error_message = None
         self.legs = {}
@@ -91,11 +94,24 @@ class TradingBot:
         if self._thread and self._thread.is_alive():
             raise RuntimeError("Bot is already running.")
         self._manual_stop.clear()
+        self._stop_only = False
+        self._exit_requested = False
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def request_stop(self):
-        """Signal the monitor loop to exit all legs on its next tick."""
+        """
+        Stop monitoring only.
+        Leaves all positions open.
+        """
+        self._stop_only = True
+        self._manual_stop.set()
+
+    def request_exit(self):
+        """
+         Stop monitoring and exit all active positions.
+        """
+        self._exit_requested = True
         self._manual_stop.set()
 
     def snapshot(self) -> dict:
@@ -157,7 +173,7 @@ class TradingBot:
                 tradingsymbol=symbol,
                 transaction_type=transaction_type,
                 quantity=qty,
-                product=self.kite.PRODUCT_MIS,
+                product=self.kite.PRODUCT_NRML,
                 order_type=self.kite.ORDER_TYPE_MARKET,
                 market_protection=2,
 
@@ -347,9 +363,22 @@ class TradingBot:
         self._set(status="waiting_for_market", legs=legs, exchange=exchange, qtys=qtys)
 
         while not self._is_market_open():
+
             if self._manual_stop.is_set():
-                self._set(status="exited", exit_reason="MANUAL STOP (before entry)",
-                          ended_at=datetime.now(IST).isoformat())
+
+                if self._stop_only:
+                    self._set(
+                        status="stopped",
+                        exit_reason="ALGORITHM STOPPED (before entry)",
+                        ended_at=datetime.now(IST).isoformat()
+                )
+                elif self._exit_requested:
+                    self._set(
+                        status="exited",
+                        exit_reason="MANUAL EXIT (before entry)",
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+
                 return
             time.sleep(30)
 
@@ -453,14 +482,32 @@ class TradingBot:
             exit_reason = None
 
             if self._manual_stop.is_set():
-                exit_reason = "MANUAL STOP"
+
+                if self._stop_only:
+                    self._set(
+                        status="stopped",
+                        exit_reason="ALGORITHM STOPPED",
+                        ended_at=datetime.now(IST).isoformat()
+                    )
+
+                    print("Algorithm stopped. Positions remain open.")
+                    return
+
+                elif self._exit_requested:
+                    exit_reason = "MANUAL EXIT"
+
             elif not self._is_market_open():
                 time.sleep(60)
                 continue
+
             else:
                 try:
-                    current_prices = {leg: self._get_ltp(legs[leg]["symbol"]) for leg in active_legs}
+                    current_prices = {
+                        leg: self._get_ltp(legs[leg]["symbol"])
+                        for leg in active_legs
+                }
                     last_known_prices = current_prices
+
                 except Exception as e:
                     self._set(error_message=f"Price fetch error: {e}")
                     time.sleep(10)

@@ -196,3 +196,13 @@ def stop():
         raise HTTPException(400, "No session is currently running.")
     _bot.request_stop()
     return {"message": "Stop requested."}
+
+@app.post("/api/exit")
+def exit():
+
+    if _bot is None or _bot.status not in _RUNNING_STATES:
+        raise HTTPException(400, "No session is currently running.")
+
+    _bot.request_exit()
+
+    return {"message": "Exit requested."}
