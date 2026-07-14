@@ -552,6 +552,8 @@
     const err = document.getElementById("setupError");
     err.textContent = "";
 
+    const buyLots = parseInt(document.getElementById("buy_lots").value) || 0;
+    const sellLots = parseInt(document.getElementById("sell_lots").value) || 0;
     const config = {
       index:          document.getElementById("index").value,
       expiry:         document.getElementById("expiry").value,
