@@ -343,8 +343,8 @@
         <div class="pnl-lbl">COMBINED LOSS</div>
         <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
       </div>
-      <button class="stop-btn" id="stopBtn" onclick="stopAlgo()">STOP ALGO</button>
-      <button class="exit-btn" id="exitBtn" onclick="exitAlgo()">EXIT</button>
+      <button class="stop-btn" id="stopBtn" onclick="stopAlgo()"disabled>STOP ALGO</button>
+      <button class="exit-btn" id="exitBtn" onclick="exitAlgo()"disabled>EXIT</button>
     </div>
 
     <div class="pos-card">
@@ -648,6 +648,9 @@ if (!config.max_loss || config.max_loss < 1) {
 
   // Stop
   async function stopAlgo() {
+    if (!confirm(
+    "Stop monitoring?\n\nYour positions will remain OPEN in Zerodha."
+    )) return;
     const btn = document.getElementById("stopBtn");
     btn.disabled = true;
     btn.textContent = "STOPPING...";
@@ -700,10 +703,40 @@ if (!config.max_loss || config.max_loss < 1) {
   //   }
   // }
 
+  // EXIT
+  async function exitAlgo() {
+    const btn = document.getElementById("exitBtn");
+    if (!confirm("Exit all active positions?")) return;
+
+    btn.disabled = true;
+    btn.textContent = "EXITING...";
+
+    try {
+
+        const res = await fetch(`${API}/exit`, {
+            method: "POST"
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            alert(data.detail || "Failed to exit.");
+            btn.disabled = false;
+            btn.textContent = "EXIT";
+        }
+
+    } catch (e) {
+
+        alert("Cannot connect to server.");
+
+        btn.disabled = false;
+        btn.textContent = "EXIT";
+    }
+}
+
   // Polling
   function startPolling() {
     if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(fetchStatus, 3000);
+    pollInterval = setInterval(fetchStatus, 2000);
     fetchStatus();
   }
 
@@ -721,6 +754,7 @@ if (!config.max_loss || config.max_loss < 1) {
     const dot     = document.getElementById("statusDot");
     const lbl     = document.getElementById("statusText");
     const stopBtn = document.getElementById("stopBtn");
+    const exitBtn = document.getElementById("exitBtn");
     const running = RUNNING_STATES.includes(data.status);
 
     if (data.status !== lastSeenStatus) {
@@ -741,24 +775,34 @@ if (!config.max_loss || config.max_loss < 1) {
     }
 
     if (running) {
-      dot.classList.add("on");
-      lbl.textContent = STATUS_LABELS[data.status] || data.status.toUpperCase();
-      lbl.classList.add("on");
-      if (!stopping) {
+
+    dot.classList.add("on");
+    lbl.textContent = STATUS_LABELS[data.status] || data.status.toUpperCase();
+    lbl.classList.add("on");
+
+    if (!stopping) {
         stopBtn.disabled = false;
         stopBtn.textContent = "STOP ALGO";
-      }
-    } else {
-      dot.classList.remove("on");
-      lbl.textContent = STATUS_LABELS[data.status] || (data.status || "STOPPED").toUpperCase();
-      lbl.classList.remove("on");
-      stopBtn.disabled = true;
-      stopBtn.textContent = "STOP ALGO";
-      stopping = false;
     }
 
-    // index/expiry aren't part of snapshot() — main_api.py never echoes the
-    // config back — so pull them from the config we last posted instead.
+    exitBtn.disabled = false;
+    exitBtn.textContent = "EXIT";
+
+}
+else {
+
+    dot.classList.remove("on");
+    lbl.textContent = STATUS_LABELS[data.status] || (data.status || "STOPPED").toUpperCase();
+    lbl.classList.remove("on");
+
+    stopBtn.disabled = true;
+    stopBtn.textContent = "STOP ALGO";
+
+    exitBtn.disabled = true;
+    exitBtn.textContent = "EXIT";
+
+    stopping = false;
+}
     document.getElementById("indexVal").textContent  = (lastConfig && lastConfig.index)  || "--";
     document.getElementById("expiryVal").textContent = (lastConfig && lastConfig.expiry) || "--";
     document.getElementById("maxLossVal").textContent =
@@ -780,7 +824,6 @@ if (!config.max_loss || config.max_loss < 1) {
     }
 
     // snapshot() keeps legs/qtys/entry_prices/current_prices as separate
-    // dicts keyed by leg name — stitch them back into one object per leg.
     ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"].forEach(leg => {
       const legInfo = data.legs && data.legs[leg];
       const info = legInfo ? {
