@@ -606,7 +606,9 @@
     const err = document.getElementById("setupError");
     err.textContent = "";
 
-    const trailAmount = trailingStopEnabled?Number(document.getElementById("trailAmount").value) || 50: null;
+    const trailAmount = Number(
+        document.getElementById("trailAmount").value
+    ) || 50;    
     const targetProfit = Number(document.getElementById("targetProfit").value) || null;
 
     const buyLots = parseInt(document.getElementById("buy_lots").value) || 0;
