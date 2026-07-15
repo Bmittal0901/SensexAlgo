@@ -865,8 +865,8 @@ else {
 
     stopping = false;
 }
-    document.getElementById("indexVal").textContent  = (lastConfig && lastConfig.index)  || "--";
-    document.getElementById("expiryVal").textContent = (lastConfig && lastConfig.expiry) || "--";
+    document.getElementById("indexVal").textContent  =     data.index || "--";
+    document.getElementById("expiryVal").textContent =  data.expiry || "--";
     const maxLossLabel = document.getElementById("maxLossLabel");
 
     if (data.trailing_stop_enabled) {
