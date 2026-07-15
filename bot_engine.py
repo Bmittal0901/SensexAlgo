@@ -55,6 +55,9 @@ class TradingBot:
           square_off_time                                (optional, "HH:MM" IST, default "15:20")
           dry_run                                         (optional, defaults to env_dry_run())
         """
+        self.trailing_stop_enabled = config.get("trailing_stop_enabled",False)
+        self.trail_amount = config.get("trail_amount",50)
+        self.target_profit = config.get("target_profit")
         self.leg_info = {}
         self.active_legs = []
         self.realized_pnl = 0.0
@@ -83,6 +86,7 @@ class TradingBot:
         self.entry_prices = {}
         self.current_prices = {}
         self.combined_loss = 0.0
+        self.max_loss = config.get("max_loss")
         self.exit_reason = None
         self.total_pnl = 0.0
         self.leg_exit_flags = {}
@@ -122,6 +126,8 @@ class TradingBot:
         with self._lock:
             return {
                 "status": self.status,
+                "index": self.config.get("index"),
+                "expiry": self.config.get("expiry"),
                 "error_message": self.error_message,
                 "dry_run": self.dry_run,
                 "exchange": self.exchange,
@@ -131,12 +137,15 @@ class TradingBot:
                 "entry_prices": self.entry_prices,
                 "current_prices": self.current_prices,
                 "combined_loss": round(self.combined_loss, 2),
-                "max_loss": self.config.get("max_loss"),
+                "max_loss": self.max_loss,
                 "exit_reason": self.exit_reason,
                 "total_pnl": round(self.total_pnl, 2),
                 "leg_exit_flags": self.leg_exit_flags,
                 "started_at": self.started_at,
                 "ended_at": self.ended_at,
+                "trailing_stop_enabled": self.trailing_stop_enabled,
+                "trail_amount": self.trail_amount,
+                "target_profit": self.target_profit,
             }
 
     def _sync_manual_position_changes(
@@ -314,7 +323,7 @@ class TradingBot:
                 quantity=qty,
                 product=self.kite.PRODUCT_NRML,
                 order_type=self.kite.ORDER_TYPE_MARKET,
-                market_protection=2,
+                market_protection=self.kite.MARKET_PROTECTION_AUTO,
 
             )
             print(f"[ORDER PLACED] {action} {qty} x {symbol} | Order ID: {order_id} | Time: {exec_time}")
@@ -639,6 +648,9 @@ class TradingBot:
         # ---------------- Monitor ----------------
         last_known_prices = dict(entry_prices)
 
+        peak_profit = 0.0
+        dynamic_max_loss = cfg["max_loss"]
+
         while True:
             exit_reason = None
 
@@ -718,6 +730,29 @@ class TradingBot:
 
                 combined_loss = compute_combined_loss(entry_prices, current_prices, qtys)
                 total_pnl = -combined_loss + self.realized_pnl
+                if (
+                    self.target_profit is not None
+                    and total_pnl >= self.target_profit
+                ):
+                    exit_reason = "TARGET PROFIT HIT"
+                current_profit = max(total_pnl, 0)
+                if self.trailing_stop_enabled:
+
+                    if current_profit > peak_profit:
+
+                        peak_profit = current_profit
+
+                        steps = int(peak_profit // 100)
+
+                        dynamic_max_loss = max(
+                            0,
+                            cfg["max_loss"] -
+                            (steps * self.trail_amount)
+                        )
+
+                        print(
+                            f"Trailing SL Updated : ₹{dynamic_max_loss}"
+                        )
                 # Optional, opt-in per-leg checks. With no per_leg_stop_loss /
                 # per_leg_target configured these never fire, so the original
                 # "combined loss threshold or manual stop only" behaviour is
@@ -734,14 +769,26 @@ class TradingBot:
                 self._set(current_prices=current_prices,
                            combined_loss=combined_loss,
                            total_pnl=total_pnl,
-                          leg_exit_flags=dict(leg_exit_flags))
+                           max_loss=dynamic_max_loss,
+                            leg_exit_flags=dict(leg_exit_flags),
+                            error_message=None,)
 
-                if should_exit(combined_loss, cfg["max_loss"]):
-                    exit_reason = "MAX LOSS HIT"
-                elif leg_exit_flags:
-                    exit_reason = f"PER-LEG TRIGGER ({', '.join(leg_exit_flags.values())})"
-                elif self._is_square_off_time():
-                    exit_reason = "EOD SQUARE-OFF"
+
+                if exit_reason is None:
+
+                    if should_exit(
+                        combined_loss,
+                        dynamic_max_loss
+                    ):
+                        exit_reason = "MAX LOSS HIT"
+
+                    elif leg_exit_flags:
+                        exit_reason = (
+                            f"PER-LEG TRIGGER ({', '.join(leg_exit_flags.values())})"
+                        )
+
+                    elif self._is_square_off_time():
+                        exit_reason = "EOD SQUARE-OFF"
 
             if exit_reason:
                 failed_legs = []

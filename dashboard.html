@@ -284,6 +284,30 @@
       </div>
       <div class="toggle-switch on" id="dryRunToggle"></div>
     </div>
+    <div class="toggle-row" onclick="toggleTrailingStop()">
+      <div class="toggle-info">
+        <div class="t-label">Trailing Stop Loss</div>
+        <div class="t-sub">OFF</div>
+      </div>
+      <div class="toggle-switch" id="trailingToggle"></div>
+    </div>
+
+    <div 
+    class="form-group" 
+    id="trailAmountGroup" 
+    style="display:none;" >
+      <label>Trail Amount (₹)</label>
+      <input type="number" id="trailAmount" min="1" value="50">
+    </div>
+    <div class="form-group">
+      <label>Target Profit (₹)</label>
+      <input
+          type="number"
+          id="targetProfit"
+          min="1"
+          placeholder="Optional"
+      >
+    </div>
     <div class="error-msg" id="setupError"></div>
     <button class="btn-primary" id="setupBtn" onclick="handleSetup()">LAUNCH ALGO</button>
 
@@ -544,11 +568,43 @@
     }
   }
 
-  // Start algo
+  let trailingStopEnabled = false;
+
+  function toggleTrailingStop() {
+
+      trailingStopEnabled = !trailingStopEnabled;
+
+      document
+          .getElementById("trailingToggle")
+          .classList.toggle(
+              "on",
+              trailingStopEnabled
+          );
+
+      document
+          .getElementById("trailAmountGroup")
+          .style.display =
+              trailingStopEnabled
+                  ? "block"
+                  : "none";
+
+      document
+          .querySelector("#trailAmountGroup")
+          .previousElementSibling
+          .querySelector(".t-sub")
+          .textContent =
+              trailingStopEnabled
+                  ? "ON"
+                  : "OFF";
+  }
+      // Start algo
   async function handleSetup() {
     const btn = document.getElementById("setupBtn");
     const err = document.getElementById("setupError");
     err.textContent = "";
+
+    const trailAmount = trailingStopEnabled?Number(document.getElementById("trailAmount").value) || 50: null;
+    const targetProfit = Number(document.getElementById("targetProfit").value) || null;
 
     const buyLots = parseInt(document.getElementById("buy_lots").value) || 0;
     const sellLots = parseInt(document.getElementById("sell_lots").value) || 0;
@@ -565,6 +621,9 @@
       sell_pe_lots: sellLots,
       max_loss:       parseFloat(document.getElementById("max_loss").value),
       dry_run:        dryRun,
+      trailing_stop_enabled: trailingStopEnabled,
+      trail_amount: trailAmount,
+      target_profit: targetProfit,
     };
 
     if (!config.expiry) {

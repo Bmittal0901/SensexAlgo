@@ -131,6 +131,10 @@ class StartRequest(BaseModel):
     expiry: str
     # lot_size intentionally hardcoded below, not a request field -- confirmed correct as of now.
 
+    trailing_stop_enabled: bool = False
+    trail_amount: float = Field(default=50, gt=0)
+    target_profit: Optional[float] = None
+
     buy_ce_strike: Optional[int] = None
     buy_pe_strike: Optional[int] = None
     sell_ce_strike: Optional[int] = None
@@ -204,6 +208,9 @@ def start(req: StartRequest):
         "per_leg_target": req.per_leg_target,
         "square_off_time": req.square_off_time,
         "dry_run": req.dry_run if req.dry_run is not None else env_dry_run(),
+        "trailing_stop_enabled": req.trailing_stop_enabled,
+        "trail_amount": req.trail_amount,
+        "target_profit": req.target_profit,
     }
 
     _bot = TradingBot(kite, config)
