@@ -750,9 +750,17 @@ class TradingBot:
                             (steps * self.trail_amount)
                         )
 
-                        print(
-                            f"Trailing SL Updated : ₹{dynamic_max_loss}"
+                        new_dynamic = max(
+                            0,
+                            cfg["max_loss"] - steps * self.trail_amount
                         )
+
+                        if new_dynamic != dynamic_max_loss:
+                            dynamic_max_loss = new_dynamic
+
+                            print(
+                                f"Trailing SL Updated: ₹{dynamic_max_loss}"
+                            )
                 # Optional, opt-in per-leg checks. With no per_leg_stop_loss /
                 # per_leg_target configured these never fire, so the original
                 # "combined loss threshold or manual stop only" behaviour is

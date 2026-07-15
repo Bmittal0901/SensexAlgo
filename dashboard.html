@@ -361,7 +361,10 @@
       <div class="chips">
         <div class="chip">Index <span id="indexVal">--</span></div>
         <div class="chip">Expiry <span id="expiryVal">--</span></div>
-        <div class="chip">Max Loss <span id="maxLossVal">--</span></div>
+        <div class="chip">
+            <span id="maxLossLabel">Max Loss</span>
+            <span id="maxLossVal">--</span>
+        </div>
       </div>
       <div class="pnl-block">
         <div class="pnl-lbl">COMBINED LOSS</div>
@@ -864,8 +867,18 @@ else {
 }
     document.getElementById("indexVal").textContent  = (lastConfig && lastConfig.index)  || "--";
     document.getElementById("expiryVal").textContent = (lastConfig && lastConfig.expiry) || "--";
+    const maxLossLabel = document.getElementById("maxLossLabel");
+
+    if (data.trailing_stop_enabled) {
+        maxLossLabel.textContent = "Trailing SL";
+    } else {
+        maxLossLabel.textContent = "Max Loss";
+    }
+
     document.getElementById("maxLossVal").textContent =
-      data.max_loss != null ? "₹" + Number(data.max_loss).toLocaleString("en-IN") : "--";
+        data.max_loss != null
+            ? "₹" + Number(data.max_loss).toLocaleString("en-IN")
+            : "--";
 
     const combinedLossDisplay = document.getElementById("combinedLossDisplay");
 
