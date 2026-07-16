@@ -63,6 +63,7 @@ class TradingBot:
         self.realized_pnl = 0.0
         self.kite = kite
         self.config = config
+        self.index_ltp = None
         self.dry_run = config.get("dry_run")
         if self.dry_run is None:
             self.dry_run = env_dry_run()
@@ -146,6 +147,7 @@ class TradingBot:
                 "trailing_stop_enabled": self.trailing_stop_enabled,
                 "trail_amount": self.trail_amount,
                 "target_profit": self.target_profit,
+                "index_ltp": self.index_ltp,
             }
 
     def _sync_manual_position_changes(
@@ -711,9 +713,15 @@ class TradingBot:
                         f"{exchange}:{legs[leg]['symbol']}"
                         for leg in active_legs
                     ]
+                    # Add underlying index
+                    if self.config["index"] == "SENSEX":
+                        index_symbol = "BSE:SENSEX"
+                    else:
+                        index_symbol = "NSE:NIFTY 50"
 
+                    symbols.append(index_symbol)
                     ltp_data = self.kite.ltp(symbols)
-
+                    self.index_ltp = ltp_data[index_symbol]["last_price"]
                     current_prices = {}
 
                     for leg in active_legs:

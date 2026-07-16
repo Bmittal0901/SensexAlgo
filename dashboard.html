@@ -360,10 +360,14 @@
       </div>
       <div class="chips">
         <div class="chip">Index <span id="indexVal">--</span></div>
+        <div id="indexLevelVal" style="font-size:11px;color:#888;margin-top:4px;">--</div>
         <div class="chip">Expiry <span id="expiryVal">--</span></div>
         <div class="chip">
             <span id="maxLossLabel">Max Loss</span>
             <span id="maxLossVal">--</span>
+        </div>
+        <div class="chip">Target Profit
+            <span id="targetProfitVal">--</span>
         </div>
       </div>
       <div class="pnl-block">
@@ -820,7 +824,13 @@ if (!config.max_loss || config.max_loss < 1) {
     const stopBtn = document.getElementById("stopBtn");
     const exitBtn = document.getElementById("exitBtn");
     const running = RUNNING_STATES.includes(data.status);
+    document.getElementById("indexVal").textContent =
+    data.index || "--";
 
+    document.getElementById("indexLevelVal").textContent =
+    data.index_ltp != null
+        ? Number(data.index_ltp).toLocaleString("en-IN")
+        : "--";
     if (data.status !== lastSeenStatus) {
       pushLog(`Status -> ${STATUS_LABELS[data.status] || data.status}`, "def");
       lastSeenStatus = data.status;
@@ -897,6 +907,11 @@ else {
     } else {
         combinedLossDisplay.style.color = "var(--muted)";
     }
+
+    document.getElementById("targetProfitVal").textContent =
+    data.target_profit != null
+        ? "₹" + Number(data.target_profit).toLocaleString("en-IN")
+        : "--";
 
     // snapshot() keeps legs/qtys/entry_prices/current_prices as separate
     ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"].forEach(leg => {
