@@ -360,7 +360,7 @@
       </div>
       <div class="chips">
           <div class="chip" id="indexChip">
-              <span>Index</span>
+              Index
               <span id="indexVal">--</span>
               <span id="indexLevelVal">--</span>
           </div>
@@ -370,7 +370,7 @@
               <span id="expiryVal">--</span>
           </div>
         <div class="chip">
-            <span id="maxLossLabel">Max Loss</span>
+            Max Loss
             <span id="maxLossVal">--</span>
         </div>
         <div class="chip">Target Profit
@@ -855,12 +855,12 @@ else {
 }
     document.getElementById("indexVal").textContent  =     data.index || "--";
     document.getElementById("expiryVal").textContent =  data.expiry || "--";
-    const maxLossLabel = document.getElementById("maxLossLabel");
+    const maxLossChip = document.getElementById("maxLossVal").parentElement;
 
     if (data.trailing_stop_enabled) {
-        maxLossLabel.textContent = "Trailing SL";
+        maxLossChip.childNodes[0].textContent = "Trailing SL ";
     } else {
-        maxLossLabel.textContent = "Max Loss";
+        maxLossChip.childNodes[0].textContent = "Max Loss ";
     }
 
     document.getElementById("maxLossVal").textContent =
