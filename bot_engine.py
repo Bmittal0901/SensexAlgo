@@ -46,6 +46,18 @@ class TradingBot:
     per-leg SL / optional per-leg target / EOD square-off / manual stop.
     """
 
+    def _update_index_ltp(self):
+        try:
+            if self.config["index"] == "SENSEX":
+                index_symbol = "BSE:SENSEX"
+            else:
+                index_symbol = "NSE:NIFTY 50"
+
+            quote = self.kite.ltp([index_symbol])
+            self.index_ltp = quote[index_symbol]["last_price"]
+
+        except Exception as e:
+            print(f"Index LTP Error: {e}")
     def __init__(self, kite, config: dict):
         """
         config keys:
@@ -509,8 +521,9 @@ class TradingBot:
         }
 
         self._set(status="waiting_for_market", legs=legs, exchange=exchange, qtys=qtys)
-
         while not self._is_market_open():
+
+            self._update_index_ltp()
 
             if self._manual_stop.is_set():
 
@@ -519,7 +532,8 @@ class TradingBot:
                         status="stopped",
                         exit_reason="ALGORITHM STOPPED (before entry)",
                         ended_at=datetime.now(IST).isoformat()
-                )
+                    )
+
                 elif self._exit_requested:
                     self._set(
                         status="exited",
@@ -528,7 +542,8 @@ class TradingBot:
                     )
 
                 return
-            time.sleep(30)
+
+            time.sleep(5)
 
         # ---------------- Entry: all 4 legs ----------------
         self._set(status="entering")
@@ -715,6 +730,9 @@ class TradingBot:
 
                     symbols.append(index_symbol)
                     ltp_data = self.kite.ltp(symbols)
+                    print("Requested symbols:", symbols)
+                    print("Returned keys:", list(ltp_data.keys()))
+                    print("Index LTP:", ltp_data.get(index_symbol))
                     self.index_ltp = ltp_data[index_symbol]["last_price"]
                     current_prices = {}
 
