@@ -189,6 +189,9 @@ def start(req: StartRequest):
         raise HTTPException(400, "A session is already running. Stop it before starting a new one.")
 
     _validate_legs(req)
+    if req.target_profit is not None and req.target_profit <= 0:
+        raise HTTPException(400, "target_profit must be positive when set.")
+
     kite = _get_authed_kite()
     lot_size = 20 if req.index == "SENSEX" else 65
     config = {

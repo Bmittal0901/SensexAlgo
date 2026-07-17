@@ -739,38 +739,6 @@ if (!config.max_loss || config.max_loss < 1) {
     }
   }
 
-  // Restart algo with same config (no token in it -- the server's session is reused)
-  // async function restartAlgo() {
-  //   if (!lastConfig) {
-  //     alert("No previous config found. Please go back to setup.");
-  //     return;
-  //   }
-  //   const btn = document.getElementById("restartBtn");
-  //   btn.disabled = true;
-  //   btn.textContent = "STARTING...";
-  //   try {
-  //     const res = await fetch(`${API}/start`, {
-  //       method: "POST",
-  //       headers: {"Content-Type": "application/json"},
-  //       body: JSON.stringify(lastConfig),
-  //     });
-  //     const data = await res.json();
-  //     if (res.ok) {
-  //       resetLogs();
-  //       btn.disabled = false;
-  //       btn.textContent = "RESTART";
-  //     } else {
-  //       alert((typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) || "Failed to start algo.");
-  //       btn.disabled = false;
-  //       btn.textContent = "RESTART";
-  //     }
-  //   } catch(e) {
-  //     alert("Cannot connect to server.");
-  //     btn.disabled = false;
-  //     btn.textContent = "RESTART";
-  //   }
-  // }
-
   // EXIT
   async function exitAlgo() {
     const btn = document.getElementById("exitBtn");
@@ -840,6 +808,7 @@ if (!config.max_loss || config.max_loss < 1) {
     let cls = "def";
       if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
       else if (data.exit_reason.includes("EOD")) cls = "eod";
+      else if (data.exit_reason.includes("TARGET PROFIT")) cls = "target";
       pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);     
       lastSeenExitReason = data.exit_reason;
     }

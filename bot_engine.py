@@ -68,7 +68,6 @@ class TradingBot:
         if self.dry_run is None:
             self.dry_run = env_dry_run()
 
-        self.square_off_time = config.get("square_off_time", "15:20")
         self.per_leg_stop_loss = config.get("per_leg_stop_loss")
         self.per_leg_target = config.get("per_leg_target")
 
@@ -128,6 +127,7 @@ class TradingBot:
             return {
                 "status": self.status,
                 "index": self.config.get("index"),
+                "index_ltp": self.index_ltp,
                 "expiry": self.config.get("expiry"),
                 "error_message": self.error_message,
                 "dry_run": self.dry_run,
@@ -147,7 +147,6 @@ class TradingBot:
                 "trailing_stop_enabled": self.trailing_stop_enabled,
                 "trail_amount": self.trail_amount,
                 "target_profit": self.target_profit,
-                "index_ltp": self.index_ltp,
             }
 
     def _sync_manual_position_changes(
@@ -302,11 +301,6 @@ class TradingBot:
         market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
         market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
         return market_open <= now <= market_close
-
-    def _is_square_off_time(self):
-        now = datetime.now(IST)
-        hh, mm = (int(x) for x in self.square_off_time.split(":"))
-        return now >= now.replace(hour=hh, minute=mm, second=0, microsecond=0)
 
     def _place_order(self, symbol, qty, transaction_type):
         exec_time = datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S")
@@ -752,15 +746,9 @@ class TradingBot:
 
                         steps = int(peak_profit // 100)
 
-                        dynamic_max_loss = max(
-                            0,
-                            cfg["max_loss"] -
-                            (steps * self.trail_amount)
-                        )
-
                         new_dynamic = max(
                             0,
-                            cfg["max_loss"] - steps * self.trail_amount
+                            cfg["max_loss"] - (steps * self.trail_amount)
                         )
 
                         if new_dynamic != dynamic_max_loss:
@@ -802,9 +790,6 @@ class TradingBot:
                         exit_reason = (
                             f"PER-LEG TRIGGER ({', '.join(leg_exit_flags.values())})"
                         )
-
-                    elif self._is_square_off_time():
-                        exit_reason = "EOD SQUARE-OFF"
 
             if exit_reason:
                 failed_legs = []
