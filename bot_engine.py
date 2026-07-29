@@ -318,7 +318,7 @@ class TradingBot:
 
     def _add_log(self, message, level="INFO"):
         self.logs.append({
-            "timestamp": datetime.now(IST).strftime("%H:%M:%S.%f")[:-3],
+            "timestamp": datetime.now(IST).strftime("%H:%M:%S"),
             "level": level,
             "message": message
         })
