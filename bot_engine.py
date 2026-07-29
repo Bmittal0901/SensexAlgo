@@ -104,6 +104,8 @@ class TradingBot:
         self.leg_exit_flags = {}
         self.started_at = None
         self.ended_at = None
+        self.logs = []
+        self.log_date = datetime.now(IST).date()
 
     # ---------------- public control surface ----------------
 
@@ -135,6 +137,13 @@ class TradingBot:
         self._manual_stop.set()
 
     def snapshot(self) -> dict:
+        today = datetime.now(IST).date()
+
+        if today != self.log_date:
+            with self._lock:
+                self.logs.clear()
+                self.log_date = today
+                
         with self._lock:
             return {
                 "status": self.status,
@@ -159,6 +168,7 @@ class TradingBot:
                 "trailing_stop_enabled": self.trailing_stop_enabled,
                 "trail_amount": self.trail_amount,
                 "target_profit": self.target_profit,
+                "logs": list(self.logs),
             }
 
     def _sync_manual_position_changes(
@@ -306,6 +316,17 @@ class TradingBot:
             for k, v in kwargs.items():
                 setattr(self, k, v)
 
+    def _add_log(self, message, level="INFO"):
+        self.logs.append({
+            "timestamp": datetime.now(IST).strftime("%H:%M:%S.%f")[:-3],
+            "level": level,
+            "message": message
+        })
+
+        # keep last 500 logs
+        if len(self.logs) > 500:
+            self.logs.pop(0)
+
     def _is_market_open(self):
         now = datetime.now(IST)
         if now.weekday() >= 5:
@@ -334,7 +355,10 @@ class TradingBot:
                 market_protection=self.kite.MARKET_PROTECTION_AUTO,
 
             )
-            print(f"[ORDER PLACED] {action} {qty} x {symbol} | Order ID: {order_id} | Time: {exec_time}")
+            msg = f"{action} {qty} x {symbol}"
+            self._add_log(msg)
+            print(msg)
+
             return order_id
         except Exception as e:
             import traceback
@@ -346,7 +370,7 @@ class TradingBot:
             print(error)
             traceback.print_exc()
             print("=" * 80)
-
+    
             self._set(error_message=error)
 
             return None
@@ -521,6 +545,7 @@ class TradingBot:
         }
 
         self._set(status="waiting_for_market", legs=legs, exchange=exchange, qtys=qtys)
+        self._add_log("Waiting for market open")
         while not self._is_market_open():
 
             self._update_index_ltp()
@@ -547,6 +572,7 @@ class TradingBot:
 
         # ---------------- Entry: all 4 legs ----------------
         self._set(status="entering")
+        self._add_log("Entering positions")
         entry_prices = {}
         entered_legs = []
         for leg in active_legs:
@@ -674,7 +700,9 @@ class TradingBot:
                         exit_reason="ALGORITHM STOPPED",
                         ended_at=datetime.now(IST).isoformat()
                     )
-
+                    self._add_log(
+                        "Algorithm stopped. Positions remain open."
+                    )
                     print("Algorithm stopped. Positions remain open.")
                     return
 
@@ -715,6 +743,7 @@ class TradingBot:
                             ended_at=datetime.now(IST).isoformat()
                         )
                         print("All positions were manually closed.")
+                        self._add_log("All positions were manually closed.")
 
                         return
 
@@ -744,7 +773,9 @@ class TradingBot:
 
                     last_known_prices = current_prices
                 except Exception as e:
-                    self._set(error_message=f"Price fetch error: {e}")
+                    error = f"Price fetch error: {e}"
+                    self._set(error_message=error)
+                    self._add_log(error, "ERROR")
                     time.sleep(10)
                     continue
 
@@ -771,7 +802,9 @@ class TradingBot:
 
                         if new_dynamic != dynamic_max_loss:
                             dynamic_max_loss = new_dynamic
-
+                            self._add_log(
+                                f"Trailing SL Updated → ₹{dynamic_max_loss}"
+                            )
                             print(
                                 f"Trailing SL Updated: ₹{dynamic_max_loss}"
                             )
@@ -812,7 +845,10 @@ class TradingBot:
             if exit_reason:
                 failed_legs = []
                 exit_symbols = []
-
+                self._add_log(
+                    f"EXIT : {exit_reason}",
+                    "EXIT"
+                )
                 print(f"\n===== EXIT : {exit_reason} =====")
 
                 for leg in active_legs:
@@ -902,6 +938,7 @@ class TradingBot:
                     ended_at=datetime.now(IST).isoformat()
                 )
 
+                self._add_log("All positions exited successfully.")
                 print("All positions exited successfully.")
                 self.active_legs = []
                 return

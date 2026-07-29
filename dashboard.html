@@ -457,26 +457,6 @@
   let stopping = false;
   let lastConfig = null;   // holds the last config posted to /api/start (no token in it -- server holds the session)
 
-  // The API has no /logs endpoint (snapshot() doesn't return one), so the
-  // log panel is built client-side from status transitions we observe while polling.
-  let logLines = [];
-  let lastSeenStatus = null;
-  let lastSeenExitReason = null;
-  let lastSeenError = null;
-
-  function pushLog(line, cls) {
-    const t = new Date().toLocaleTimeString("en-IN", {timeZone: "Asia/Kolkata", hour12: false});
-    logLines.push({line, cls, t});
-    if (logLines.length > 200) logLines.shift();
-  }
-
-  function resetLogs() {
-    logLines = [];
-    lastSeenStatus = null;
-    lastSeenExitReason = null;
-    lastSeenError = null;
-  }
-
   // Clock
   function updateClock() {
     document.getElementById("clock").textContent =
@@ -703,7 +683,6 @@ if (!config.max_loss || config.max_loss < 1) {
       if (res.ok) {
         document.getElementById("dryBadge").classList.toggle("on", dryRun);
         stopping = false;
-        resetLogs();
         goToScreen(3);
         startPolling();
         btn.disabled = false;
@@ -806,23 +785,23 @@ if (!config.max_loss || config.max_loss < 1) {
     data.index_ltp != null
         ? Number(data.index_ltp).toLocaleString("en-IN")
         : "--";
-    if (data.status !== lastSeenStatus) {
-      pushLog(`Status -> ${STATUS_LABELS[data.status] || data.status}`, "def");
-      lastSeenStatus = data.status;
-    }
-    if (data.exit_reason && data.exit_reason !== lastSeenExitReason) {
-    const pnlTxt = "₹" + Number(data.total_pnl || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});     
-    let cls = "def";
-      if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
-      else if (data.exit_reason.includes("EOD")) cls = "eod";
-      else if (data.exit_reason.includes("TARGET PROFIT")) cls = "target";
-      pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);     
-      lastSeenExitReason = data.exit_reason;
-    }
-    if (data.error_message && data.error_message !== lastSeenError) {
-      pushLog(`[ERROR] ${data.error_message}`, "error");
-      lastSeenError = data.error_message;
-    }
+    // if (data.status !== lastSeenStatus) {
+    //   pushLog(`Status -> ${STATUS_LABELS[data.status] || data.status}`, "def");
+    //   lastSeenStatus = data.status;
+    // }
+    // if (data.exit_reason && data.exit_reason !== lastSeenExitReason) {
+    // const pnlTxt = "₹" + Number(data.total_pnl || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});     
+    // let cls = "def";
+    //   if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
+    //   else if (data.exit_reason.includes("EOD")) cls = "eod";
+    //   else if (data.exit_reason.includes("TARGET PROFIT")) cls = "target";
+    //   pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);     
+    //   lastSeenExitReason = data.exit_reason;
+    // }
+    // if (data.error_message && data.error_message !== lastSeenError) {
+    //   pushLog(`[ERROR] ${data.error_message}`, "error");
+    //   lastSeenError = data.error_message;
+    // }
 
     if (running) {
 
@@ -901,13 +880,27 @@ else {
       updateCard(leg, info);
     });
 
-    document.getElementById("logCount").textContent = logLines.length + " entries";
+    const logs = data.logs || [];
+
+    document.getElementById("logCount").textContent =
+        logs.length + " entries";
+
     const box = document.getElementById("logBox");
-    if (!logLines.length) {
-      box.innerHTML = '<span class="log-empty">No logs yet...</span>';
+
+    if (!logs.length) {
+
+        box.innerHTML =
+            '<span class="log-empty">No logs yet...</span>';
+
     } else {
-      box.innerHTML = logLines.map(l => `<span class="log-line ${l.cls}">[${l.t}] ${l.line}</span>`).join("\n");
-      box.scrollTop = box.scrollHeight;
+
+        box.innerHTML = logs.map(log => `
+            <span class="log-line ${log.level.toLowerCase()}">
+                [${log.timestamp}] ${log.message}
+            </span>
+        `).join("");
+
+        box.scrollTop = box.scrollHeight;
     }
   }
 
