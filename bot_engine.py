@@ -143,7 +143,7 @@ class TradingBot:
             with self._lock:
                 self.logs.clear()
                 self.log_date = today
-                
+
         with self._lock:
             return {
                 "status": self.status,
@@ -372,7 +372,7 @@ class TradingBot:
             print("=" * 80)
     
             self._set(error_message=error)
-
+            self._add_log(error, "ERROR")
             return None
     
     def _get_ltp(self, symbol):
@@ -518,7 +518,9 @@ class TradingBot:
                 cfg["sell_ce_strike"], cfg["sell_pe_strike"],
             )
         except Exception as e:
-            self._set(status="error", error_message=str(e), ended_at=datetime.now(IST).isoformat())
+            error = str(e)
+            self._set(status="error", error_message=error, ended_at=datetime.now(IST).isoformat())
+            self._add_log(error, "ERROR")
             return
 
         lot_size = cfg["lot_size"]
@@ -611,11 +613,19 @@ class TradingBot:
                         ),
                         ended_at=datetime.now(IST).isoformat()
                     )
+                    self._add_log(
+                        f"Failed to enter {leg}. Rollback failed for: {rollback_failed}",
+                        "ERROR"
+                    )
                 else:
                     self._set(
                     status="error",
                     error_message=f"{leg} failed: {self.error_message}",
                     ended_at=datetime.now(IST).isoformat()
+                    )
+                    self._add_log(
+                        f"{leg} failed: {self.error_message}",
+                        "ERROR"
                     )
                 return
 
@@ -625,6 +635,7 @@ class TradingBot:
 
                 print("\nENTRY INCOMPLETE")
                 print("Rolling back previously entered positions...")
+                
 
                 rollback_failed = []
 
@@ -650,7 +661,11 @@ class TradingBot:
                         ),
                     ended_at=datetime.now(IST).isoformat()
                     )
-
+                    self._add_log(
+                        f"{leg} entry failed and rollback was incomplete. "
+                        f"Open positions may remain: {rollback_failed}",
+                        "ERROR"
+                    )
                 else:
 
                     self._set(
@@ -658,7 +673,10 @@ class TradingBot:
                     error_message=f"{leg} failed: {self.error_message}",
                     ended_at=datetime.now(IST).isoformat()
                 )
-
+                    self._add_log(
+                        f"{leg} failed: {self.error_message}",
+                        "ERROR"
+                    )
                 return
 
             entered_legs.append(leg)
@@ -886,6 +904,7 @@ class TradingBot:
                     print("MANUAL ACTION REQUIRED")
                     print(message)
                     print("***************\n")
+                    self._add_log(message, "ERROR")
                     self.active_legs = []
                     return
 
