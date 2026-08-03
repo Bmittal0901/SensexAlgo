@@ -123,7 +123,8 @@
 
     .dash-grid { padding:20px; display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:1; }
 
-    .status-bar { grid-column:1/3; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 24px; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+    .status-bar { grid-column:1/3; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 24px; display:flex; flex-direction:column; gap:16px; }
+    .status-bar-row { display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
     .status-pill { display:flex; align-items:center; gap:10px; }
     .pulse-dot { width:10px; height:10px; border-radius:50%; background:var(--red); flex-shrink:0; }
     .pulse-dot.on { background:var(--green); animation:pulse-anim 1.5s infinite; }
@@ -146,6 +147,12 @@
     .stop-btn:disabled { opacity:0.3; cursor:not-allowed; }
     .exit-btn{background:#dc3545;color:white;padding:9px 22px;border-radius:8px;font-family:var(--mono);font-size:11px;letter-spacing:1px;cursor:pointer;transition:all 0.2s;border:none;}
     .exit-btn:hover{background:#bb2d3b;}
+    .exit-btn:disabled { opacity:0.3; cursor:not-allowed; }
+
+    .risk-row { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; padding-top:16px; border-top:1px solid var(--border); }
+    .risk-row .form-group { flex:1; min-width:130px; margin-bottom:0; }
+    .risk-row .btn-primary { width:auto; padding:11px 26px; flex-shrink:0; }
+
     .pos-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; position:relative; overflow:hidden; }
     .pos-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--border2),transparent); }
     .pos-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
@@ -323,11 +330,6 @@
         }
       }
 
-      // document.getElementById("buy_lots").addEventListener("input", function() {
-      //   const v = parseInt(this.value) || 0;
-      //   document.getElementById("sell_lots_display").value = v * 3;
-      // });
-
       document.getElementById("index").addEventListener("change", updateLotSize);
 
       // Set default value when the page loads
@@ -354,35 +356,66 @@
 
   <div class="dash-grid">
     <div class="status-bar">
-      <div class="status-pill">
-        <div class="pulse-dot" id="statusDot"></div>
-        <div class="status-lbl" id="statusText">STARTING</div>
-      </div>
-      <div class="chips">
-          <div class="chip" id="indexChip">
-              Index
-              <span id="indexVal">--</span>
-              <span id="indexLevelVal">--</span>
-          </div>
+      <div class="status-bar-row">
+        <div class="status-pill">
+          <div class="pulse-dot" id="statusDot"></div>
+          <div class="status-lbl" id="statusText">STARTING</div>
+        </div>
+        <div class="chips">
+            <div class="chip" id="indexChip">
+                Index
+                <span id="indexVal">--</span>
+                <span id="indexLevelVal">--</span>
+            </div>
 
+            <div class="chip">
+                Expiry
+                <span id="expiryVal">--</span>
+            </div>
           <div class="chip">
-              Expiry
-              <span id="expiryVal">--</span>
+              Max Loss
+              <span id="maxLossVal">--</span>
           </div>
-        <div class="chip">
-            Max Loss
-            <span id="maxLossVal">--</span>
+          <div class="chip">Target Profit
+              <span id="targetProfitVal">--</span>
+          </div>
         </div>
-        <div class="chip">Target Profit
-            <span id="targetProfitVal">--</span>
+        <button class="exit-btn" id="exitBtn" onclick="exitAlgo()"disabled>EXIT</button>
+        <div class="pnl-block">
+          <div class="pnl-lbl">COMBINED LOSS</div>
+          <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
         </div>
+        <button class="stop-btn" id="stopBtn" onclick="stopAlgo()"disabled>STOP</button>
       </div>
-      <div class="pnl-block">
-        <div class="pnl-lbl">COMBINED LOSS</div>
-        <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
+
+      <div class="risk-row">
+        <div class="form-group">
+            <label>Combined Stop Loss</label>
+            <input type="number" id="liveMaxLoss">
+        </div>
+
+        <div class="form-group">
+            <label>Target Profit</label>
+            <input type="number" id="liveTarget">
+        </div>
+
+        <div class="form-group">
+            <label>Trail Amount</label>
+            <input type="number" id="liveTrailAmount">
+        </div>
+
+        <button class="btn-primary" onclick="updateRisk()">SAVE CHANGES</button>
       </div>
-      <button class="stop-btn" id="stopBtn" onclick="stopAlgo()"disabled>STOP ALGO</button>
-      <button class="exit-btn" id="exitBtn" onclick="exitAlgo()"disabled>EXIT</button>
+
+      <div
+        id="riskUpdateMsg"
+        style="
+            font-size:12px;
+            color:#00e676;
+            text-align:center;
+            display:none;
+          ">
+      </div>
     </div>
 
     <div class="pos-card">
@@ -428,50 +461,6 @@
       <div class="pos-row"><span class="r-lbl">Entry</span><span class="r-val" id="SELL_PEEntry">--</span></div>
       <div class="pos-row"><span class="r-lbl">Current</span><span class="r-val" id="SELL_PECurrent">--</span></div>
     </div>
-
-    <div class="pos-card">
-
-      <div class="pos-head">
-          <div class="pos-type">LIVE RISK CONTROLS</div>
-      </div>
-
-      <div class="form-group">
-          <label>Combined Stop Loss</label>
-          <input type="number" id="liveMaxLoss">
-      </div>
-
-      <div class="form-group">
-          <label>Target Profit</label>
-          <input type="number" id="liveTarget">
-      </div>
-
-      <div class="form-group">
-          <label>Trail Amount</label>
-          <input
-              type="number"
-              id="liveTrailAmount">
-    </div>
-
-    <button
-        class="btn-primary"
-        onclick="updateRisk()">
-
-        SAVE CHANGES
-
-    </button>
-
-    <div
-      id="riskUpdateMsg"
-      style="
-          margin-top:10px;
-          font-size:12px;
-          color:#00e676;
-          text-align:center;
-          display:none;
-        ">
-    </div>
-
-</div>
 
     <div class="log-panel">
       <div class="log-head">
@@ -827,12 +816,12 @@ if (!config.max_loss || config.max_loss < 1) {
         const data = await res.json();
         alert((typeof data.detail === "string" ? data.detail : null) || "Failed to stop algo.");
         btn.disabled = false;
-        btn.textContent = "STOP ALGO";
+        btn.textContent = "STOP";
         stopping = false;
       }
     } catch(e) {
       btn.disabled = false;
-      btn.textContent = "STOP ALGO";
+      btn.textContent = "STOP";
       stopping = false;
     }
   }
@@ -897,23 +886,6 @@ if (!config.max_loss || config.max_loss < 1) {
     data.index_ltp != null
         ? Number(data.index_ltp).toLocaleString("en-IN")
         : "--";
-    // if (data.status !== lastSeenStatus) {
-    //   pushLog(`Status -> ${STATUS_LABELS[data.status] || data.status}`, "def");
-    //   lastSeenStatus = data.status;
-    // }
-    // if (data.exit_reason && data.exit_reason !== lastSeenExitReason) {
-    // const pnlTxt = "₹" + Number(data.total_pnl || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});     
-    // let cls = "def";
-    //   if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
-    //   else if (data.exit_reason.includes("EOD")) cls = "eod";
-    //   else if (data.exit_reason.includes("TARGET PROFIT")) cls = "target";
-    //   pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);     
-    //   lastSeenExitReason = data.exit_reason;
-    // }
-    // if (data.error_message && data.error_message !== lastSeenError) {
-    //   pushLog(`[ERROR] ${data.error_message}`, "error");
-    //   lastSeenError = data.error_message;
-    // }
 
     if (running) {
 
@@ -923,7 +895,7 @@ if (!config.max_loss || config.max_loss < 1) {
 
     if (!stopping) {
         stopBtn.disabled = false;
-        stopBtn.textContent = "STOP ALGO";
+        stopBtn.textContent = "STOP";
     }
 
     exitBtn.disabled = false;
@@ -937,7 +909,7 @@ else {
     lbl.classList.remove("on");
 
     stopBtn.disabled = true;
-    stopBtn.textContent = "STOP ALGO";
+    stopBtn.textContent = "STOP";
 
     exitBtn.disabled = true;
     exitBtn.textContent = "EXIT";
