@@ -263,7 +263,6 @@ def update_risk(req: UpdateRiskRequest):
     _bot.update_risk(
         max_loss=req.max_loss,
         target_profit=req.target_profit,
-        trailing=req.trailing_stop_enabled,
         trail_amount=req.trail_amount
     )
 
