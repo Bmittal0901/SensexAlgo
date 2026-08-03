@@ -429,6 +429,49 @@
       <div class="pos-row"><span class="r-lbl">Current</span><span class="r-val" id="SELL_PECurrent">--</span></div>
     </div>
 
+    <div class="pos-card">
+
+      <div class="pos-head">
+          <div class="pos-type">LIVE RISK CONTROLS</div>
+      </div>
+
+      <div class="form-group">
+          <label>Combined Stop Loss</label>
+          <input type="number" id="liveMaxLoss">
+      </div>
+
+      <div class="form-group">
+          <label>Target Profit</label>
+          <input type="number" id="liveTarget">
+      </div>
+
+      <div class="toggle-row">
+          <div class="toggle-info">
+              <div class="t-label">Trailing Stop</div>
+          </div>
+
+          <input
+              type="checkbox"
+              id="liveTrailing">
+      </div>
+
+      <div class="form-group">
+          <label>Trail Amount</label>
+          <input
+              type="number"
+              id="liveTrailAmount">
+    </div>
+
+    <button
+        class="btn-primary"
+        onclick="updateRisk()">
+
+        SAVE CHANGES
+
+    </button>
+
+</div>
+
     <div class="log-panel">
       <div class="log-head">
         <span>Live Logs</span>
@@ -700,6 +743,58 @@ if (!config.max_loss || config.max_loss < 1) {
     }
   }
 
+
+  async function updateRisk(){
+      const body={ 
+          max_loss:Number(
+              document.getElementById(
+                  "liveMaxLoss"
+              ).value
+          ),
+
+          target_profit:Number(
+              document.getElementById(
+                  "liveTarget"
+              ).value
+          )||null,
+
+          trailing_stop_enabled:
+          document.getElementById(
+              "liveTrailing"
+          ).checked,
+
+          trail_amount:Number(
+              document.getElementById(
+                  "liveTrailAmount"
+              ).value
+          )
+      };
+      if(body.max_loss <= 0){
+        alert("Invalid Stop Loss");
+        return;
+      }
+
+      if(body.trail_amount <= 0){
+          alert("Invalid Trail Amount");
+          return;
+      }
+      const r=await fetch(
+          `${API}/update-risk`,
+          {
+              method:"POST",
+              headers:{
+                  "Content-Type":"application/json"
+              },
+              body:JSON.stringify(body)
+          }
+      );
+
+      if(!r.ok){
+          alert("Unable to update.");
+          return;
+      }
+      alert("Risk Updated.");
+  }
   // Stop
   async function stopAlgo() {
     if (!confirm(
@@ -846,7 +941,32 @@ else {
         data.max_loss != null
             ? "₹" + Number(data.max_loss).toLocaleString("en-IN")
             : "--";
+    
+    const liveMaxLoss =
+    document.getElementById("liveMaxLoss");
 
+    if(liveMaxLoss){
+
+    liveMaxLoss.value =
+    data.max_loss;
+
+    document.getElementById("liveTarget").value =
+    data.target_profit ?? "";
+
+    document.getElementById("liveTrailing").checked =
+    data.trailing_stop_enabled;
+
+    document.getElementById("liveTrailAmount").value =
+    data.trail_amount;
+
+    }
+
+    document.getElementById("liveTarget").value=data.target_profit??"";
+
+    document.getElementById("liveTrailing").checked=data.trailing_stop_enabled;
+    const trail = document.getElementById("liveTrailAmount");
+    trail.disabled =!data.trailing_stop_enabled;
+    document.getElementById("liveTrailAmount").value=data.trail_amount;
     const combinedLossDisplay = document.getElementById("combinedLossDisplay");
 
     const combinedLoss = data.combined_loss || 0;

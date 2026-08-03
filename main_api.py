@@ -163,6 +163,12 @@ _LEG_FIELDS = {
 }
 
 
+class UpdateRiskRequest(BaseModel):
+    max_loss: Optional[float] = None
+    target_profit: Optional[float] = None
+    trailing_stop_enabled: Optional[bool] = None
+    trail_amount: Optional[float] = None
+
 def _validate_legs(req: StartRequest):
     active = []
     for leg, (strike_field, lots_field) in _LEG_FIELDS.items():
@@ -244,3 +250,23 @@ def exit():
     _bot.request_exit()
 
     return {"message": "Exit requested."}
+
+@app.post("/api/update-risk")
+def update_risk(req: UpdateRiskRequest):
+
+    if _bot is None:
+        raise HTTPException(
+            400,
+            "No active session."
+        )
+
+    _bot.update_risk(
+        max_loss=req.max_loss,
+        target_profit=req.target_profit,
+        trailing=req.trailing_stop_enabled,
+        trail_amount=req.trail_amount
+    )
+
+    return {
+        "message":"Risk updated."
+    }

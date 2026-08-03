@@ -171,6 +171,54 @@ class TradingBot:
                 "logs": list(self.logs),
             }
 
+    def update_risk(
+        self,
+        max_loss=None,
+        target_profit=None,
+        trailing=None,
+        trail_amount=None
+    ):
+
+        with self._lock:
+
+            if max_loss is not None:
+
+                old_sl = self.max_loss
+
+                self.max_loss = float(max_loss)
+
+                # Reset trailing from the new stop loss
+                self.dynamic_max_loss = float(max_loss)
+
+                self._add_log(
+                    f"Combined SL changed from ₹{old_sl:.0f} to ₹{self.max_loss:.0f}. "
+                    "Trailing reset."
+                )
+
+            if target_profit is not None:
+
+                self.target_profit = float(target_profit)
+
+                self._add_log(
+                    f"Target Profit changed → ₹{self.target_profit:.0f}"
+                )
+
+            if trailing is not None:
+
+                self.trailing_stop_enabled = trailing
+
+                self._add_log(
+                    f"Trailing {'Enabled' if trailing else 'Disabled'}"
+                )
+
+            if trail_amount is not None:
+
+                self.trail_amount = float(trail_amount)
+
+                self._add_log(
+                    f"Trail Amount changed → ₹{self.trail_amount:.0f}"
+                )
+
     def _sync_manual_position_changes(
         self,
         active_legs,
@@ -704,7 +752,7 @@ class TradingBot:
         last_known_prices = dict(entry_prices)
 
         peak_profit = 0.0
-        dynamic_max_loss = cfg["max_loss"]
+        self.dynamic_max_loss = self.max_loss
 
         while True:
             exit_reason = None
@@ -815,16 +863,16 @@ class TradingBot:
 
                         new_dynamic = max(
                             0,
-                            cfg["max_loss"] - (steps * self.trail_amount)
+                            self.max_loss - (steps * self.trail_amount)
                         )
 
-                        if new_dynamic != dynamic_max_loss:
-                            dynamic_max_loss = new_dynamic
+                        if new_dynamic != self.dynamic_max_loss:
+                            self.dynamic_max_loss = new_dynamic
                             self._add_log(
-                                f"Trailing SL Updated → ₹{dynamic_max_loss}"
+                                f"Trailing SL Updated → ₹{self.dynamic_max_loss:.0f}"
                             )
                             print(
-                                f"Trailing SL Updated: ₹{dynamic_max_loss}"
+                                f"Trailing SL Updated: ₹{self.dynamic_max_loss:.0f}"
                             )
                 # Optional, opt-in per-leg checks. With no per_leg_stop_loss /
                 # per_leg_target configured these never fire, so the original
@@ -842,7 +890,7 @@ class TradingBot:
                 self._set(current_prices=current_prices,
                            combined_loss=combined_loss,
                            total_pnl=total_pnl,
-                           max_loss=dynamic_max_loss,
+                           max_loss=self.dynamic_max_loss,
                             leg_exit_flags=dict(leg_exit_flags),
                             error_message=None,)
 
@@ -851,7 +899,7 @@ class TradingBot:
 
                     if should_exit(
                         combined_loss,
-                        dynamic_max_loss
+                        self.dynamic_max_loss
                     ):
                         exit_reason = "MAX LOSS HIT"
 
