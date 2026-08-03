@@ -498,6 +498,7 @@
 
   let pollInterval = null;
   let dryRun = true;
+  let riskControlsDirty = false;
   let stopping = false;
   let lastConfig = null;   // holds the last config posted to /api/start (no token in it -- server holds the session)
 
@@ -791,6 +792,9 @@ if (!config.max_loss || config.max_loss < 1) {
             return;
         }
 
+        await fetchStatus();
+        riskControlsDirty = false;
+
         msg.style.display = "block";
         msg.textContent = "✔ Risk parameters updated successfully.";
 
@@ -959,14 +963,11 @@ else {
     const liveTarget = document.getElementById("liveTarget");
     const liveTrailAmount = document.getElementById("liveTrailAmount");
 
-    if (document.activeElement !== liveMaxLoss)
-        liveMaxLoss.value = data.max_loss ?? "";
-
-    if (document.activeElement !== liveTarget)
-        liveTarget.value = data.target_profit ?? "";
-
-    if (document.activeElement !== liveTrailAmount)
-        liveTrailAmount.value = data.trail_amount ?? "";
+    if (!riskControlsDirty) {
+      liveMaxLoss.value = data.max_loss ?? "";
+      liveTarget.value = data.target_profit ?? "";
+      liveTrailAmount.value = data.trail_amount ?? "";
+    }
 
     const combinedLossDisplay = document.getElementById("combinedLossDisplay");
 
@@ -1047,6 +1048,20 @@ else {
       curEl.textContent   = "--";                        curEl.className   = "r-val";
     }
   }
+
+  document.addEventListener("DOMContentLoaded", () => {
+
+    ["liveMaxLoss", "liveTarget", "liveTrailAmount"].forEach(id => {
+
+        document.getElementById(id).addEventListener("input", () => {
+
+            riskControlsDirty = true;
+
+        });
+
+    });
+
+  });
 
   init();
 </script>
