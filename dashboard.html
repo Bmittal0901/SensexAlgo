@@ -150,7 +150,7 @@
     .exit-btn:disabled { opacity:0.3; cursor:not-allowed; }
 
     .risk-row { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; padding-top:16px; border-top:1px solid var(--border); }
-    .risk-row .form-group { flex:1; min-width:130px; margin-bottom:0; }
+    .risk-row .form-group { flex:1; min-width:180px; margin-bottom:0; }
     .risk-row .btn-primary { width:auto; padding:11px 26px; flex-shrink:0; }
 
     .pos-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; position:relative; overflow:hidden; }
@@ -397,11 +397,6 @@
         <div class="form-group">
             <label>Target Profit</label>
             <input type="number" id="liveTarget">
-        </div>
-
-        <div class="form-group">
-            <label>Trail Amount</label>
-            <input type="number" id="liveTrailAmount">
         </div>
 
         <button class="btn-primary" onclick="updateRisk()">SAVE CHANGES</button>
@@ -745,22 +740,11 @@ if (!config.max_loss || config.max_loss < 1) {
 
     const body = {
         max_loss: Number(document.getElementById("liveMaxLoss").value),
-
-        target_profit:
-            Number(document.getElementById("liveTarget").value) || null,
-
-        trail_amount:
-            Number(document.getElementById("liveTrailAmount").value)
+        target_profit: Number(document.getElementById("liveTarget").value) || null,
     };
 
     if (body.max_loss <= 0) {
         alert("Invalid Stop Loss");
-        btn.disabled = false;
-        return;
-    }
-
-    if (body.trail_amount <= 0) {
-        alert("Invalid Trail Amount");
         btn.disabled = false;
         return;
     }
@@ -933,12 +917,10 @@ else {
     
     const liveMaxLoss = document.getElementById("liveMaxLoss");
     const liveTarget = document.getElementById("liveTarget");
-    const liveTrailAmount = document.getElementById("liveTrailAmount");
 
     if (!riskControlsDirty) {
       liveMaxLoss.value = data.max_loss ?? "";
       liveTarget.value = data.target_profit ?? "";
-      liveTrailAmount.value = data.trail_amount ?? "";
     }
 
     const combinedLossDisplay = document.getElementById("combinedLossDisplay");
@@ -981,6 +963,9 @@ else {
 
     const box = document.getElementById("logBox");
 
+    const shouldAutoScroll =
+    box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+
     if (!logs.length) {
 
         box.innerHTML =
@@ -994,7 +979,9 @@ else {
             </span>
         `).join("");
 
-        box.scrollTop = box.scrollHeight;
+        if (shouldAutoScroll) {
+          box.scrollTop = box.scrollHeight;
+        }
     }
   }
 
@@ -1023,7 +1010,7 @@ else {
 
   document.addEventListener("DOMContentLoaded", () => {
 
-    ["liveMaxLoss", "liveTarget", "liveTrailAmount"].forEach(id => {
+    ["liveMaxLoss", "liveTarget",].forEach(id => {
 
         document.getElementById(id).addEventListener("input", () => {
 
