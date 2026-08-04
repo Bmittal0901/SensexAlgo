@@ -149,10 +149,9 @@
     .exit-btn:hover{background:#bb2d3b;}
     .exit-btn:disabled { opacity:0.3; cursor:not-allowed; }
 
-    .risk-row { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; padding-top:16px; border-top:1px solid var(--border); }
-    .risk-inputs { display:flex; gap:10px; flex:1; min-width:0; }
+    .risk-row { display:flex; flex-direction:column; gap:14px; padding-top:16px; border-top:1px solid var(--border); }
+    .risk-inputs { display:flex; gap:10px; }
     .risk-inputs .form-group { flex:1; min-width:0; margin-bottom:0; }
-    .risk-row .btn-primary { width:auto; padding:11px 26px; flex-shrink:0; }
 
     .pos-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; position:relative; overflow:hidden; }
     .pos-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--border2),transparent); }
