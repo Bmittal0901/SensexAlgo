@@ -150,7 +150,8 @@
     .exit-btn:disabled { opacity:0.3; cursor:not-allowed; }
 
     .risk-row { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; padding-top:16px; border-top:1px solid var(--border); }
-    .risk-row .form-group { flex:1; min-width:180px; margin-bottom:0; }
+    .risk-inputs { display:flex; gap:10px; flex:1; min-width:0; }
+    .risk-inputs .form-group { flex:1; min-width:0; margin-bottom:0; }
     .risk-row .btn-primary { width:auto; padding:11px 26px; flex-shrink:0; }
 
     .pos-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; position:relative; overflow:hidden; }
@@ -189,6 +190,9 @@
       .status-bar, .log-panel { grid-column:1; }
       .card { padding:28px 20px; }
       .form-grid { grid-template-columns:1fr; }
+      .risk-inputs { gap:8px; }
+      .risk-inputs .form-group label { font-size:9px; }
+      .risk-inputs input { padding:9px 8px; font-size:12px; }
     }
   </style>
 </head>
@@ -389,14 +393,16 @@
       </div>
 
       <div class="risk-row">
-        <div class="form-group">
-            <label>Combined Stop Loss</label>
-            <input type="number" id="liveMaxLoss">
-        </div>
+        <div class="risk-inputs">
+          <div class="form-group">
+              <label>Combined Stop Loss</label>
+              <input type="number" id="liveMaxLoss">
+          </div>
 
-        <div class="form-group">
-            <label>Target Profit</label>
-            <input type="number" id="liveTarget">
+          <div class="form-group">
+              <label>Target Profit</label>
+              <input type="number" id="liveTarget">
+          </div>
         </div>
 
         <button class="btn-primary" onclick="updateRisk()">SAVE CHANGES</button>
