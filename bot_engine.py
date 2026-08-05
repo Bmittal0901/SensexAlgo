@@ -101,6 +101,7 @@ class TradingBot:
         self.max_loss = float(config["max_loss"])
         self.initial_max_loss = float(config["max_loss"])
         self.dynamic_max_loss = float(config["max_loss"])
+        self.trailing_start_profit = 0.0
         self.peak_profit = 0.0
         self.exit_reason = None
         self.total_pnl = 0.0
@@ -192,7 +193,9 @@ class TradingBot:
 
                 # Reset trailing from the new stop loss
                 self.dynamic_max_loss = float(max_loss)
-                self.peak_profit = max(self.total_pnl, 0)
+                current_profit = max(self.total_pnl, 0)
+                self.peak_profit = current_profit
+                self.trailing_start_profit = current_profit
 
                 self._add_log(
                     f"Combined SL changed from ₹{old_sl:.0f} to ₹{self.max_loss:.0f}. "
@@ -861,8 +864,8 @@ class TradingBot:
                     if current_profit > self.peak_profit:
 
                         self.peak_profit = current_profit
-
-                        steps = int(self.peak_profit // 100)
+                        profit_since_reset = self.peak_profit - self.trailing_start_profit
+                        steps = int(profit_since_reset // 100)
 
                         new_dynamic = max(
                             0,
