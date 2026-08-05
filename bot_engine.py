@@ -98,7 +98,10 @@ class TradingBot:
         self.entry_prices = {}
         self.current_prices = {}
         self.combined_loss = 0.0
-        self.max_loss = config.get("max_loss")
+        self.max_loss = float(config["max_loss"])
+        self.initial_max_loss = float(config["max_loss"])
+        self.dynamic_max_loss = float(config["max_loss"])
+        self.peak_profit = 0.0
         self.exit_reason = None
         self.total_pnl = 0.0
         self.leg_exit_flags = {}
@@ -159,7 +162,7 @@ class TradingBot:
                 "entry_prices": self.entry_prices,
                 "current_prices": self.current_prices,
                 "combined_loss": round(self.combined_loss, 2),
-                "max_loss": self.max_loss,
+                "max_loss": self.dynamic_max_loss,
                 "exit_reason": self.exit_reason,
                 "total_pnl": round(self.total_pnl, 2),
                 "leg_exit_flags": self.leg_exit_flags,
@@ -184,11 +187,12 @@ class TradingBot:
             if max_loss is not None:
 
                 old_sl = self.max_loss
-
+                self.initial_max_loss = float(max_loss)
                 self.max_loss = float(max_loss)
 
                 # Reset trailing from the new stop loss
                 self.dynamic_max_loss = float(max_loss)
+                self.peak_profit = max(self.total_pnl, 0)
 
                 self._add_log(
                     f"Combined SL changed from ₹{old_sl:.0f} to ₹{self.max_loss:.0f}. "
@@ -751,7 +755,6 @@ class TradingBot:
         # ---------------- Monitor ----------------
         last_known_prices = dict(entry_prices)
 
-        peak_profit = 0.0
         self.dynamic_max_loss = self.max_loss
 
         while True:
@@ -855,15 +858,15 @@ class TradingBot:
                 current_profit = max(total_pnl, 0)
                 if self.trailing_stop_enabled:
 
-                    if current_profit > peak_profit:
+                    if current_profit > self.peak_profit:
 
-                        peak_profit = current_profit
+                        self.peak_profit = current_profit
 
-                        steps = int(peak_profit // 100)
+                        steps = int(self.peak_profit // 100)
 
                         new_dynamic = max(
                             0,
-                            self.max_loss - (steps * self.trail_amount)
+                            self.initial_max_loss - (steps * self.trail_amount)
                         )
 
                         if new_dynamic != self.dynamic_max_loss:
@@ -890,7 +893,6 @@ class TradingBot:
                 self._set(current_prices=current_prices,
                            combined_loss=combined_loss,
                            total_pnl=total_pnl,
-                           max_loss=self.dynamic_max_loss,
                             leg_exit_flags=dict(leg_exit_flags),
                             error_message=None,)
 
