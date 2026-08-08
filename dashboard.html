@@ -77,6 +77,9 @@
 
     .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
     .strike-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+    .premium-hint { font-family:var(--mono); font-size:11px; color:var(--muted); min-height:15px; }
+    .premium-hint.loaded { color:var(--accent); }
+    .premium-hint.err { color:var(--red); }
     .form-group { display:flex; flex-direction:column; gap:7px; }
     .form-group label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.8px; font-weight:500; }
     .form-group input, .form-group select { background:var(--surface2); border:1px solid var(--border); border-radius:10px; color:var(--text); padding:11px 14px; font-size:14px; font-family:var(--sans); outline:none; transition:border-color 0.2s,box-shadow 0.2s; width:100%; }
@@ -258,18 +261,22 @@
       <div class="form-group">
         <label>Sell PE Strike</label>
         <input type="number" id="sell_pe_strike" placeholder="e.g. 82000"/>
+        <div class="premium-hint" id="sell_pe_strike_premium"></div>
       </div>
       <div class="form-group">
         <label>Sell CE Strike</label>
         <input type="number" id="sell_ce_strike" placeholder="e.g. 83000"/>
+        <div class="premium-hint" id="sell_ce_strike_premium"></div>
       </div>
       <div class="form-group">
         <label>Buy CE Strike</label>
         <input type="number" id="buy_ce_strike" placeholder="e.g. 82500"/>
+        <div class="premium-hint" id="buy_ce_strike_premium"></div>
       </div>
       <div class="form-group">
         <label>Buy PE Strike</label>
         <input type="number" id="buy_pe_strike" placeholder="e.g. 82500"/>
+        <div class="premium-hint" id="buy_pe_strike_premium"></div>
       </div>
     </div>
     <div class="section-label">Strategy Parameters</div>
@@ -1029,6 +1036,61 @@ else {
         });
 
     });
+
+    // ---------------- Live premium while filling in strikes (setup screen) ----------------
+    const STRIKE_FIELDS = [
+      { id: "sell_pe_strike", type: "PE" },
+      { id: "sell_ce_strike", type: "CE" },
+      { id: "buy_ce_strike",  type: "CE" },
+      { id: "buy_pe_strike",  type: "PE" },
+    ];
+
+    let premiumTimer = null;
+
+    function fetchPremium(field) {
+      const hint = document.getElementById(field.id + "_premium");
+      const strikeVal = document.getElementById(field.id).value;
+      const indexVal = document.getElementById("index").value;
+      const expiryVal = document.getElementById("expiry").value;
+
+      if (!strikeVal || !indexVal || !expiryVal) {
+        hint.textContent = "";
+        hint.className = "premium-hint";
+        return;
+      }
+
+      hint.textContent = "Loading…";
+      hint.className = "premium-hint";
+
+      const url = `${API}/quote?index=${encodeURIComponent(indexVal)}`
+        + `&expiry=${encodeURIComponent(expiryVal)}`
+        + `&strike=${encodeURIComponent(strikeVal)}`
+        + `&option_type=${field.type}`;
+
+      fetch(url)
+        .then(res => res.ok ? res.json() : res.json().then(d => { throw new Error(d.detail || "Not found"); }))
+        .then(data => {
+          hint.textContent = "Premium: ₹" + Number(data.ltp).toLocaleString("en-IN", {minimumFractionDigits: 2});
+          hint.className = "premium-hint loaded";
+        })
+        .catch(err => {
+          hint.textContent = typeof err.message === "string" ? err.message : "Could not fetch premium";
+          hint.className = "premium-hint err";
+        });
+    }
+
+    function scheduleAllPremiums() {
+      clearTimeout(premiumTimer);
+      premiumTimer = setTimeout(() => {
+        STRIKE_FIELDS.forEach(fetchPremium);
+      }, 500);
+    }
+
+    STRIKE_FIELDS.forEach(field => {
+      document.getElementById(field.id).addEventListener("input", scheduleAllPremiums);
+    });
+    document.getElementById("index").addEventListener("change", scheduleAllPremiums);
+    document.getElementById("expiry").addEventListener("change", scheduleAllPremiums);
 
   });
 

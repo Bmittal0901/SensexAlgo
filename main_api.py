@@ -33,6 +33,7 @@ from kiteconnect import KiteConnect
 from pydantic import BaseModel, Field
 
 from bot_engine import TradingBot, env_dry_run
+from utils import resolve_multi_leg_symbols
 from zerodha_config import API_KEY, API_SECRET
 
 app = FastAPI(title="SensexAlgo API")
@@ -72,6 +73,46 @@ def dashboard():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------- live premium lookup (setup screen only) ----------------
+
+@app.get("/api/quote")
+def quote(index: str, expiry: str, strike: int, option_type: str):
+    """
+    Resolves the exact contract for the given index/expiry/strike/type and
+    returns its live LTP. Used by the setup screen to show the current
+    premium while the user is filling in strikes -- purely informational,
+    doesn't touch the bot or place anything.
+    """
+    if option_type not in ("CE", "PE"):
+        raise HTTPException(400, "option_type must be CE or PE")
+
+    kite = _get_authed_kite()
+
+    # resolve_multi_leg_symbols resolves any subset of the 4 legs; a single
+    # strike's symbol/exchange doesn't depend on which leg slot it's put
+    # in, so BUY_CE/BUY_PE are reused here purely as resolution slots.
+    kwargs = {"buy_ce_strike": None, "buy_pe_strike": None,
+              "sell_ce_strike": None, "sell_pe_strike": None}
+    leg_key = "BUY_CE" if option_type == "CE" else "BUY_PE"
+    kwargs["buy_ce_strike" if option_type == "CE" else "buy_pe_strike"] = strike
+
+    try:
+        legs, exchange = resolve_multi_leg_symbols(kite, index, expiry, **kwargs)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+    symbol = legs[leg_key]["symbol"]
+    key = f"{exchange}:{symbol}"
+
+    try:
+        ltp_data = kite.ltp(key)
+        ltp = ltp_data[key]["last_price"]
+    except Exception as e:
+        raise HTTPException(502, f"Could not fetch LTP: {e}")
+
+    return {"symbol": symbol, "ltp": ltp}
 
 
 # ---------------- Zerodha login ----------------
