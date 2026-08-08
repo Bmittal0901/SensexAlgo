@@ -76,6 +76,7 @@
     .user-sub { font-size:11px; color:var(--muted); margin-left:auto; }
 
     .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+    .strike-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
     .form-group { display:flex; flex-direction:column; gap:7px; }
     .form-group label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.8px; font-weight:500; }
     .form-group input, .form-group select { background:var(--surface2); border:1px solid var(--border); border-radius:10px; color:var(--text); padding:11px 14px; font-size:14px; font-family:var(--sans); outline:none; transition:border-color 0.2s,box-shadow 0.2s; width:100%; }
@@ -192,6 +193,8 @@
       .risk-inputs { gap:8px; }
       .risk-inputs .form-group label { font-size:9px; }
       .risk-inputs input { padding:9px 8px; font-size:12px; }
+      .strike-grid { gap:8px; }
+      .strike-grid input { padding:9px 8px; font-size:12px; }
     }
   </style>
 </head>
@@ -250,6 +253,8 @@
         <label>Expiry</label>
         <input type="date" id="expiry"/>
       </div>
+    </div>
+    <div class="strike-grid">
       <div class="form-group">
         <label>Sell PE Strike</label>
         <input type="number" id="sell_pe_strike" placeholder="e.g. 82000"/>
