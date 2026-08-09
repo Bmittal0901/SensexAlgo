@@ -232,37 +232,334 @@
 </div>
 
 <!-- SCREEN 2 — SETUP -->
-<div class="form-grid" style="margin-bottom:20px">
+<div id="screen2" class="screen center-wrap">
+  <div class="card">
 
-  <div class="form-group">
-    <label>Max Combined Loss (₹)</label>
-    <input
-      type="number"
-      id="max_loss"
-      placeholder="e.g. 15000"
-      min="1"
-    />
+    <div class="brand">
+      <div class="brand-tag">Multi-Leg Options Algo</div>
+      <div class="brand-sub">4-Leg · Combined-Loss Exit</div>
+    </div>
+
+    <div class="user-chip">
+      <div class="user-dot"></div>
+      <div class="user-name" id="userName">Connected</div>
+      <div class="user-sub">Zerodha ✓</div>
+    </div>
+
+
+    <!-- ================= CONTRACT SETUP ================= -->
+
+    <div class="section-label">Contract Setup</div>
+
+    <!-- INDEX + EXPIRY -->
+    <div class="form-grid" style="margin-bottom:20px">
+
+      <div class="form-group">
+        <label>Index</label>
+        <select id="index">
+          <option value="SENSEX" selected>SENSEX</option>
+          <option value="NIFTY">NIFTY</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Expiry</label>
+        <input type="date" id="expiry"/>
+      </div>
+
+    </div>
+
+
+    <!-- ================= SELL STRIKES ================= -->
+
+    <div class="section-label">Sell Positions</div>
+
+    <!-- SELL CE + SELL PE IN ONE LINE -->
+    <div class="form-grid" style="margin-bottom:14px">
+
+      <div class="form-group">
+        <label>Sell CE Strike</label>
+        <input
+          type="number"
+          id="sell_ce_strike"
+          placeholder="e.g. 83000"
+        />
+        <div
+          id="sell_ce_premium"
+          class="premium-hint"
+        ></div>
+      </div>
+
+      <div class="form-group">
+        <label>Sell PE Strike</label>
+        <input
+          type="number"
+          id="sell_pe_strike"
+          placeholder="e.g. 82000"
+        />
+        <div
+          id="sell_pe_premium"
+          class="premium-hint"
+        ></div>
+      </div>
+
+    </div>
+
+
+    <!-- SELL LOTS -->
+    <div class="form-grid" style="margin-bottom:20px">
+
+      <div class="form-group">
+        <label>Sell Lots</label>
+        <input
+          type="number"
+          id="sell_lots"
+          value="0"
+          min="0"
+        />
+      </div>
+
+    </div>
+
+
+    <!-- ================= BUY STRIKES ================= -->
+
+    <div class="section-label">Buy Positions</div>
+
+    <!-- BUY CE + BUY PE IN ONE LINE -->
+    <div class="form-grid" style="margin-bottom:14px">
+
+      <div class="form-group">
+        <label>Buy CE Strike</label>
+        <input
+          type="number"
+          id="buy_ce_strike"
+          placeholder="e.g. 82500"
+        />
+        <div
+          id="buy_ce_premium"
+          class="premium-hint"
+        ></div>
+      </div>
+
+      <div class="form-group">
+        <label>Buy PE Strike</label>
+        <input
+          type="number"
+          id="buy_pe_strike"
+          placeholder="e.g. 82500"
+        />
+        <div
+          id="buy_pe_premium"
+          class="premium-hint"
+        ></div>
+      </div>
+
+    </div>
+
+
+    <!-- BUY LOTS -->
+    <div class="form-grid" style="margin-bottom:20px">
+
+      <div class="form-group">
+        <label>Buy Lots</label>
+        <input
+          type="number"
+          id="buy_lots"
+          value="0"
+          min="0"
+        />
+      </div>
+
+    </div>
+
+
+    <!-- ================= STRATEGY PARAMETERS ================= -->
+
+    <div class="section-label">Strategy Parameters</div>
+
+    <!-- LOT SIZE -->
+    <div class="form-grid" style="margin-bottom:14px">
+
+      <div class="form-group">
+        <label>Lot Size</label>
+        <input
+          type="number"
+          id="lot_size"
+          readonly
+        />
+      </div>
+
+    </div>
+
+
+    <!-- MAX LOSS + TARGET PROFIT IN ONE LINE -->
+    <div class="form-grid" style="margin-bottom:20px">
+
+      <div class="form-group">
+        <label>Max Combined Loss (₹)</label>
+        <input
+          type="number"
+          id="max_loss"
+          placeholder="e.g. 15000"
+          min="1"
+        />
+      </div>
+
+      <div class="form-group">
+        <label>Target Profit (₹)</label>
+        <input
+          type="number"
+          id="targetProfit"
+          min="1"
+          placeholder="Optional"
+        />
+      </div>
+
+    </div>
+
+
+    <!-- ================= MODE ================= -->
+
+    <div class="section-label">Mode</div>
+
+
+    <!-- TRAILING STOP LOSS FIRST -->
+    <div
+      class="toggle-row"
+      onclick="toggleTrailingStop()"
+    >
+
+      <div class="toggle-info">
+
+        <div class="t-label">
+          Trailing Stop Loss
+        </div>
+
+        <div
+          class="t-sub"
+          id="trailingStopSub"
+        >
+          OFF
+        </div>
+
+      </div>
+
+      <div
+        class="toggle-switch"
+        id="trailingToggle"
+      ></div>
+
+    </div>
+
+
+    <!-- TRAILING AMOUNT -->
+    <div
+      class="form-group"
+      id="trailAmountGroup"
+      style="display:none; margin-bottom:20px;"
+    >
+
+      <label>Trail Amount (₹)</label>
+
+      <input
+        type="number"
+        id="trailAmount"
+        min="1"
+        value="50"
+      />
+
+    </div>
+
+
+    <!-- DRY RUN -->
+    <div
+      class="toggle-row"
+      onclick="toggleDryRun()"
+    >
+
+      <div class="toggle-info">
+
+        <div class="t-label">
+          Dry Run Mode
+        </div>
+
+        <div
+          class="t-sub"
+          id="dryRunSub"
+        >
+          ON — No real orders will be placed
+        </div>
+
+      </div>
+
+      <div
+        class="toggle-switch on"
+        id="dryRunToggle"
+      ></div>
+
+    </div>
+
+
+    <!-- ================= ERROR ================= -->
+
+    <div
+      class="error-msg"
+      id="setupError"
+    ></div>
+
+
+    <!-- ================= LAUNCH ================= -->
+
+    <button
+      class="btn-primary"
+      id="setupBtn"
+      onclick="handleSetup()"
+    >
+      LAUNCH ALGO
+    </button>
+
+
+    <!-- ================= LOT SIZE SCRIPT ================= -->
+
+    <script>
+
+      function updateLotSize() {
+
+        const index =
+          document.getElementById("index").value;
+
+        const lotInput =
+          document.getElementById("lot_size");
+
+        if (index === "SENSEX") {
+
+          lotInput.value = 20;
+
+        } else if (index === "NIFTY") {
+
+          lotInput.value = 65;
+
+        }
+
+      }
+
+
+      document
+        .getElementById("index")
+        .addEventListener(
+          "change",
+          updateLotSize
+        );
+
+
+      // Set default lot size
+      // when the page loads
+      updateLotSize();
+
+    </script>
+
   </div>
-
-  <div class="form-group">
-    <label>Target Profit (₹)</label>
-    <input
-      type="number"
-      id="targetProfit"
-      placeholder="Optional"
-      min="1"
-    />
-  </div>
-
-</div>
-
-<div class="form-group" style="margin-bottom:20px">
-  <label>Lot Size</label>
-  <input
-    type="number"
-    id="lot_size"
-    readonly
-  />
 </div>
 
 <!-- SCREEN 3 — DASHBOARD -->
