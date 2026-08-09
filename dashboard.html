@@ -1047,7 +1047,7 @@ else {
 
     let premiumTimer = null;
 
-    function fetchPremium(field) {
+    function fetchPremium(field, silent) {
       const hint = document.getElementById(field.id + "_premium");
       const strikeVal = document.getElementById(field.id).value;
       const indexVal = document.getElementById("index").value;
@@ -1059,8 +1059,13 @@ else {
         return;
       }
 
-      hint.textContent = "Loading…";
-      hint.className = "premium-hint";
+      // On auto-refresh ticks, leave the last known value showing instead
+      // of flashing "Loading…" every few seconds -- only the manual/typed
+      // path shows the loading state.
+      if (!silent) {
+        hint.textContent = "Loading…";
+        hint.className = "premium-hint";
+      }
 
       const url = `${API}/quote?index=${encodeURIComponent(indexVal)}`
         + `&expiry=${encodeURIComponent(expiryVal)}`
@@ -1082,7 +1087,7 @@ else {
     function scheduleAllPremiums() {
       clearTimeout(premiumTimer);
       premiumTimer = setTimeout(() => {
-        STRIKE_FIELDS.forEach(fetchPremium);
+        STRIKE_FIELDS.forEach(field => fetchPremium(field, false));
       }, 500);
     }
 
@@ -1091,6 +1096,15 @@ else {
     });
     document.getElementById("index").addEventListener("change", scheduleAllPremiums);
     document.getElementById("expiry").addEventListener("change", scheduleAllPremiums);
+
+    // Auto-refresh every 4s while the setup screen is actually visible, so
+    // premiums track the live market instead of freezing at whatever they
+    // were the moment you finished typing.
+    setInterval(() => {
+      if (document.getElementById("screen2").classList.contains("active")) {
+        STRIKE_FIELDS.forEach(field => fetchPremium(field, true));
+      }
+    }, 2000);
 
   });
 
