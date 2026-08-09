@@ -77,17 +77,29 @@ _premium_symbol_cache = {}
 # than once, regardless of how often the frontend polls. If an upstream
 # call does fail (e.g. still mid-cooldown), we fall back to the last
 # known price instead of surfacing an error, as long as we have one.
+#
+# Caching alone isn't enough, though: without a backoff, the very next
+# poll (2s later) would just retry Zerodha again, and if a rejected
+# request still counts against the rate-limit window (as it does for
+# order endpoints), every retry re-triggers the same 429 and the
+# cooldown never gets a chance to clear. _ltp_state["backoff_until"]
+# stops that retry storm: once a call fails, we don't hit Zerodha again
+# until the backoff window passes, regardless of how often /api/quotes
+# is polled in the meantime.
 _ltp_cache = {}   # "EXCHANGE:SYMBOL" -> (timestamp, price)
 _ltp_cache_lock = threading.Lock()
-_LTP_CACHE_TTL = 1.5  # seconds
+_LTP_CACHE_TTL = 1.5          # seconds
+_LTP_BACKOFF_SECONDS = 10     # cooldown after a failed upstream call
+_ltp_state = {"backoff_until": 0.0}
 
 
 def _get_ltps(kite, keys):
     """Fetch LTPs for `keys` (list of "EXCHANGE:SYMBOL" strings), using a
     short-lived cache so repeated/overlapping requests for the same
-    contract don't each hit Zerodha. Falls back to stale cached data
-    instead of raising if the upstream call fails and we have something
-    to fall back to."""
+    contract don't each hit Zerodha, plus a failure backoff so a rate
+    limit doesn't turn into a self-sustaining retry storm. Falls back to
+    stale cached data instead of raising whenever there's something to
+    fall back to."""
     now = time.time()
     result = {}
     stale_keys = []
@@ -103,15 +115,13 @@ def _get_ltps(kite, keys):
     if not stale_keys:
         return result
 
-    try:
-        fresh = kite.ltp(stale_keys)
-    except Exception:
-        # Upstream call failed (rate limit, transient network issue, ...).
-        # Serve whatever we last saw for these keys rather than erroring
-        # out the whole request; only re-raise if we have nothing at all
-        # to fall back to for one of them.
+    with _ltp_cache_lock:
+        in_backoff = now < _ltp_state["backoff_until"]
+        wait = round(_ltp_state["backoff_until"] - now, 1) if in_backoff else 0
+
+    def _fallback_or_raise(err):
+        missing = []
         with _ltp_cache_lock:
-            missing = []
             for key in stale_keys:
                 cached = _ltp_cache.get(key)
                 if cached:
@@ -119,8 +129,22 @@ def _get_ltps(kite, keys):
                 else:
                     missing.append(key)
         if missing:
-            raise
+            raise err
         return result
+
+    if in_backoff:
+        # Don't hit Zerodha again while we're still in the cooldown from a
+        # recent failure -- that's what was keeping the lockout alive.
+        return _fallback_or_raise(
+            RuntimeError(f"Rate limited. Retrying automatically in {wait}s.")
+        )
+
+    try:
+        fresh = kite.ltp(stale_keys)
+    except Exception as e:
+        with _ltp_cache_lock:
+            _ltp_state["backoff_until"] = time.time() + _LTP_BACKOFF_SECONDS
+        return _fallback_or_raise(e)
 
     with _ltp_cache_lock:
         for key in stale_keys:

@@ -1,6 +1,7 @@
 # utils.py
 from datetime import datetime
 import threading
+import time
 
 import pandas as pd
 import pytz
@@ -19,26 +20,48 @@ IST = pytz.timezone("Asia/Kolkata")
 # The instrument list only changes once a day (new contracts get listed
 # at day start), so it's cached per exchange per calendar day instead of
 # being re-fetched on every lookup.
-_instrument_cache = {}   # exchange -> (date, DataFrame)
+_instrument_cache = {}            # exchange -> (date, DataFrame)
+_instrument_backoff_until = {}    # exchange -> unix timestamp
 _instrument_cache_lock = threading.Lock()
+
+# If a fetch fails (almost always a rate limit), don't retry on the very
+# next request -- that just re-triggers the same 429 every poll tick and
+# keeps the cooldown alive indefinitely. Back off for a stretch instead.
+_INSTRUMENT_BACKOFF_SECONDS = 15
 
 
 def _get_instruments_df(kite, exchange):
     today = datetime.now(IST).date()
+    now = time.time()
 
     with _instrument_cache_lock:
         cached = _instrument_cache.get(exchange)
         if cached and cached[0] == today:
             return cached[1]
 
+        backoff_until = _instrument_backoff_until.get(exchange, 0)
+        if now < backoff_until:
+            wait = round(backoff_until - now, 1)
+            raise RuntimeError(
+                f"Instrument list temporarily unavailable (rate limited). "
+                f"Retrying automatically in {wait}s -- not retrying immediately "
+                f"to avoid keeping the rate limit tripped."
+            )
+
     # Fetch outside the lock -- it's a slow network call, and blocking
     # every other in-flight request on it (including ones for a different
     # exchange) is worse than the rare case of two threads both fetching
     # once on a cache-cold start.
-    df = pd.DataFrame(kite.instruments(exchange))
+    try:
+        df = pd.DataFrame(kite.instruments(exchange))
+    except Exception:
+        with _instrument_cache_lock:
+            _instrument_backoff_until[exchange] = time.time() + _INSTRUMENT_BACKOFF_SECONDS
+        raise
 
     with _instrument_cache_lock:
         _instrument_cache[exchange] = (today, df)
+        _instrument_backoff_until.pop(exchange, None)
 
     return df
 
