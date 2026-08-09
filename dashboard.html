@@ -76,9 +76,7 @@
     .user-sub { font-size:11px; color:var(--muted); margin-left:auto; }
 
     .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
-    .contract-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
     .strike-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
-    .full-width { grid-column:1/3; }
     .premium-hint { font-family:var(--mono); font-size:11px; color:var(--muted); min-height:15px; }
     .premium-hint.loaded { color:var(--accent); }
     .premium-hint.err { color:var(--red); }
@@ -195,8 +193,6 @@
       .status-bar, .log-panel { grid-column:1; }
       .card { padding:28px 20px; }
       .form-grid { grid-template-columns:1fr; }
-      .contract-grid { grid-template-columns:1fr 1fr; }
-      .full-width { grid-column:1/3; }
       .risk-inputs { gap:8px; }
       .risk-inputs .form-group label { font-size:9px; }
       .risk-inputs input { padding:9px 8px; font-size:12px; }
@@ -248,7 +244,7 @@
       <div class="user-sub">Zerodha ✓</div>
     </div>
     <div class="section-label">Contract Setup</div>
-    <div class="contract-grid">
+    <div class="form-grid" style="margin-bottom:20px">
       <div class="form-group">
         <label>Index</label>
         <select id="index">
@@ -261,8 +257,6 @@
         <input type="date" id="expiry"/>
       </div>
     </div>
-
-    <!-- SELL CE + PE on one line; one shared SELL LOTS field below -->
     <div class="strike-grid">
       <div class="form-group">
         <label>Sell PE Strike</label>
@@ -274,67 +268,67 @@
         <input type="number" id="sell_ce_strike" placeholder="e.g. 83000"/>
         <div class="premium-hint" id="sell_ce_strike_premium"></div>
       </div>
-      <div class="form-group full-width">
-        <label>Sell Lots</label>
-        <input type="number" id="sell_lots" value="0" min="0"/>
-      </div>
-
-      <!-- BUY CE + PE on one line; one shared BUY LOTS field below -->
-      <div class="form-group">
-        <label>Buy PE Strike</label>
-        <input type="number" id="buy_pe_strike" placeholder="e.g. 82500"/>
-        <div class="premium-hint" id="buy_pe_strike_premium"></div>
-      </div>
       <div class="form-group">
         <label>Buy CE Strike</label>
         <input type="number" id="buy_ce_strike" placeholder="e.g. 82500"/>
         <div class="premium-hint" id="buy_ce_strike_premium"></div>
       </div>
-      <div class="form-group full-width">
-        <label>Buy Lots</label>
-        <input type="number" id="buy_lots" value="0" min="0"/>
+      <div class="form-group">
+        <label>Buy PE Strike</label>
+        <input type="number" id="buy_pe_strike" placeholder="e.g. 82500"/>
+        <div class="premium-hint" id="buy_pe_strike_premium"></div>
       </div>
     </div>
-
     <div class="section-label">Strategy Parameters</div>
     <div class="form-grid" style="margin-bottom:20px">
       <div class="form-group">
         <label>Lot Size</label>
-        <input type="number" id="lot_size" readonly />
+          <input type="number" id="lot_size" readonly />
       </div>
-      <div></div>
       <div class="form-group">
+        <label>Buy Lots</label>
+        <input type="number" id="buy_lots" value="0" min="0"/>
+      </div>
+      <div class="form-group">
+        <label>Sell Lots</label>
+        <input type="number" id="sell_lots" value="0" min="0"/>
+      </div>
+      <div class="form-group" style="grid-column:1/3">
         <label>Max Combined Loss (₹)</label>
         <input type="number" id="max_loss" placeholder="e.g. 15000" min="1"/>
       </div>
-      <div class="form-group">
-        <label>Target Profit (₹)</label>
-        <input type="number" id="targetProfit" min="1" placeholder="Optional"/>
-      </div>
     </div>
-
     <div class="section-label">Mode</div>
-
-    <!-- Trailing Stop Loss above Dry Run Mode -->
-    <div class="toggle-row" onclick="toggleTrailingStop()">
-      <div class="toggle-info">
-        <div class="t-label">Trailing Stop Loss</div>
-        <div class="t-sub" id="trailingSub">OFF</div>
-      </div>
-      <div class="toggle-switch" id="trailingToggle"></div>
-    </div>
-
-    <div class="form-group" id="trailAmountGroup" style="display:none; margin-bottom:20px;">
-      <label>Trail Amount (₹)</label>
-      <input type="number" id="trailAmount" min="1" value="50"/>
-    </div>
-
     <div class="toggle-row" onclick="toggleDryRun()">
       <div class="toggle-info">
         <div class="t-label">Dry Run Mode</div>
         <div class="t-sub" id="dryRunSub">ON — No real orders will be placed</div>
       </div>
       <div class="toggle-switch on" id="dryRunToggle"></div>
+    </div>
+    <div class="toggle-row" onclick="toggleTrailingStop()">
+      <div class="toggle-info">
+        <div class="t-label">Trailing Stop Loss</div>
+        <div class="t-sub">OFF</div>
+      </div>
+      <div class="toggle-switch" id="trailingToggle"></div>
+    </div>
+
+    <div 
+    class="form-group" 
+    id="trailAmountGroup" 
+    style="display:none;" >
+      <label>Trail Amount (₹)</label>
+      <input type="number" id="trailAmount" min="1" value="50">
+    </div>
+    <div class="form-group">
+      <label>Target Profit (₹)</label>
+      <input
+          type="number"
+          id="targetProfit"
+          min="1"
+          placeholder="Optional"
+      >
     </div>
     <div class="error-msg" id="setupError"></div>
     <button class="btn-primary" id="setupBtn" onclick="handleSetup()">LAUNCH ALGO</button>
@@ -634,8 +628,14 @@
                   ? "block"
                   : "none";
 
-      document.getElementById("trailingSub").textContent =
-          trailingStopEnabled ? "ON" : "OFF";
+      document
+          .querySelector("#trailAmountGroup")
+          .previousElementSibling
+          .querySelector(".t-sub")
+          .textContent =
+              trailingStopEnabled
+                  ? "ON"
+                  : "OFF";
   }
       // Start algo
   async function handleSetup() {
@@ -653,10 +653,10 @@
     const config = {
       index:          document.getElementById("index").value,
       expiry:         document.getElementById("expiry").value,
-      buy_ce_strike:  document.getElementById("buy_ce_strike").value ? parseInt(document.getElementById("buy_ce_strike").value) : null,
-      buy_pe_strike:  document.getElementById("buy_pe_strike").value ? parseInt(document.getElementById("buy_pe_strike").value) : null,
-      sell_ce_strike: document.getElementById("sell_ce_strike").value ? parseInt(document.getElementById("sell_ce_strike").value) : null,
-      sell_pe_strike: document.getElementById("sell_pe_strike").value ? parseInt(document.getElementById("sell_pe_strike").value) : null,
+      buy_ce_strike:  parseInt(document.getElementById("buy_ce_strike").value),
+      buy_pe_strike:  parseInt(document.getElementById("buy_pe_strike").value),
+      sell_ce_strike: parseInt(document.getElementById("sell_ce_strike").value),
+      sell_pe_strike: parseInt(document.getElementById("sell_pe_strike").value),
       buy_ce_lots: buyLots,
       buy_pe_lots: buyLots,
       sell_ce_lots: sellLots,
@@ -980,20 +980,25 @@ else {
 
     const box = document.getElementById("logBox");
 
-    const currentScrollTop = box.scrollTop;
+    const shouldAutoScroll =
+    box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
 
     if (!logs.length) {
-        box.innerHTML = '<span class="log-empty">No logs yet...</span>';
+
+        box.innerHTML =
+            '<span class="log-empty">No logs yet...</span>';
+
     } else {
+
         box.innerHTML = logs.map(log => `
             <span class="log-line ${log.level.toLowerCase()}">
                 [${log.timestamp}] ${log.message}
             </span>
         `).join("");
 
-        // Never force the log panel to the newest entry. Preserve the user's
-        // current position so scrolling to the top remains possible.
-        box.scrollTop = currentScrollTop;
+        if (shouldAutoScroll) {
+          box.scrollTop = box.scrollHeight;
+        }
     }
   }
 
@@ -1033,142 +1038,73 @@ else {
     });
 
     // ---------------- Live premium while filling in strikes (setup screen) ----------------
-    // One backend request updates all entered strikes. The backend then makes
-    // one kite.ltp() call for all unique contracts. This avoids the old
-    // one-request-per-strike pattern that caused Zerodha 429 / "Too many
-    // requests" errors.
     const STRIKE_FIELDS = [
-      { id: "sell_pe_strike", leg: "SELL_PE" },
-      { id: "sell_ce_strike", leg: "SELL_CE" },
-      { id: "buy_pe_strike",  leg: "BUY_PE" },
-      { id: "buy_ce_strike",  leg: "BUY_CE" },
+      { id: "sell_pe_strike", type: "PE" },
+      { id: "sell_ce_strike", type: "CE" },
+      { id: "buy_ce_strike",  type: "CE" },
+      { id: "buy_pe_strike",  type: "PE" },
     ];
 
     let premiumTimer = null;
-    let premiumRefreshTimer = null;
-    let premiumRequestRunning = false;
 
-    async function fetchEnteredPremiums(silent = false) {
-      if (premiumRequestRunning) return;
-
+    function fetchPremium(field, silent) {
+      const hint = document.getElementById(field.id + "_premium");
+      const strikeVal = document.getElementById(field.id).value;
       const indexVal = document.getElementById("index").value;
       const expiryVal = document.getElementById("expiry").value;
-      if (!indexVal || !expiryVal) return;
 
-      const params = new URLSearchParams({
-        index: indexVal,
-        expiry: expiryVal,
-      });
-
-      let hasStrike = false;
-      for (const field of STRIKE_FIELDS) {
-        const input = document.getElementById(field.id);
-        const value = input ? input.value.trim() : "";
-        if (value) {
-          params.set(field.id, value);
-          hasStrike = true;
-        }
-      }
-
-      if (!hasStrike) {
-        STRIKE_FIELDS.forEach(field => {
-          const hint = document.getElementById(field.id + "_premium");
-          if (hint) {
-            hint.textContent = "";
-            hint.className = "premium-hint";
-          }
-        });
+      if (!strikeVal || !indexVal || !expiryVal) {
+        hint.textContent = "";
+        hint.className = "premium-hint";
         return;
       }
 
-      premiumRequestRunning = true;
-
+      // On auto-refresh ticks, leave the last known value showing instead
+      // of flashing "Loading…" every few seconds -- only the manual/typed
+      // path shows the loading state.
       if (!silent) {
-        STRIKE_FIELDS.forEach(field => {
-          const input = document.getElementById(field.id);
-          const hint = document.getElementById(field.id + "_premium");
-          if (input && input.value.trim() && hint) {
-            hint.textContent = "Loading…";
-            hint.className = "premium-hint";
-          }
-        });
+        hint.textContent = "Loading…";
+        hint.className = "premium-hint";
       }
 
-      try {
-        const res = await fetch(`${API}/quotes?${params.toString()}`);
-        const data = res.ok
-          ? await res.json()
-          : await res.json().then(d => {
-              throw new Error(d.detail || "Could not fetch premiums");
-            });
+      const url = `${API}/quote?index=${encodeURIComponent(indexVal)}`
+        + `&expiry=${encodeURIComponent(expiryVal)}`
+        + `&strike=${encodeURIComponent(strikeVal)}`
+        + `&option_type=${field.type}`;
 
-        const quotes = data.quotes || {};
-
-        STRIKE_FIELDS.forEach(field => {
-          const input = document.getElementById(field.id);
-          const hint = document.getElementById(field.id + "_premium");
-          if (!input || !hint || !input.value.trim()) {
-            if (hint) {
-              hint.textContent = "";
-              hint.className = "premium-hint";
-            }
-            return;
-          }
-
-          const quote = quotes[field.leg];
-          if (quote && quote.ltp != null) {
-            hint.textContent = "Premium: ₹" + Number(quote.ltp).toLocaleString(
-              "en-IN",
-              {minimumFractionDigits: 2}
-            );
-            hint.className = "premium-hint loaded";
-          } else {
-            hint.textContent = "Could not fetch premium";
-            hint.className = "premium-hint err";
-          }
+      fetch(url)
+        .then(res => res.ok ? res.json() : res.json().then(d => { throw new Error(d.detail || "Not found"); }))
+        .then(data => {
+          hint.textContent = "Premium: ₹" + Number(data.ltp).toLocaleString("en-IN", {minimumFractionDigits: 2});
+          hint.className = "premium-hint loaded";
+        })
+        .catch(err => {
+          hint.textContent = typeof err.message === "string" ? err.message : "Could not fetch premium";
+          hint.className = "premium-hint err";
         });
-      } catch (err) {
-        // During silent refresh keep the previous good premium visible instead
-        // of replacing it with an error/loading message.
-        if (!silent) {
-          STRIKE_FIELDS.forEach(field => {
-            const input = document.getElementById(field.id);
-            const hint = document.getElementById(field.id + "_premium");
-            if (input && input.value.trim() && hint) {
-              hint.textContent = typeof err.message === "string"
-                ? err.message
-                : "Could not fetch premiums";
-              hint.className = "premium-hint err";
-            }
-          });
-        }
-      } finally {
-        premiumRequestRunning = false;
-      }
     }
 
     function scheduleAllPremiums() {
       clearTimeout(premiumTimer);
-      // Wait until the user pauses typing before making the request.
-      premiumTimer = setTimeout(() => fetchEnteredPremiums(false), 600);
+      premiumTimer = setTimeout(() => {
+        STRIKE_FIELDS.forEach(field => fetchPremium(field, false));
+      }, 500);
     }
 
     STRIKE_FIELDS.forEach(field => {
-      const input = document.getElementById(field.id);
-      if (input) input.addEventListener("input", scheduleAllPremiums);
+      document.getElementById(field.id).addEventListener("input", scheduleAllPremiums);
     });
-
     document.getElementById("index").addEventListener("change", scheduleAllPremiums);
     document.getElementById("expiry").addEventListener("change", scheduleAllPremiums);
 
-    // Refresh entered-strike premiums every 2 seconds while the setup
-    // screen is visible. All entered strikes are updated in ONE API call.
-    premiumRefreshTimer = setInterval(() => {
-      const screen = document.getElementById("screen2");
-      if (screen && screen.classList.contains("active")) {
-        fetchEnteredPremiums(true);
+    // Auto-refresh every 4s while the setup screen is actually visible, so
+    // premiums track the live market instead of freezing at whatever they
+    // were the moment you finished typing.
+    setInterval(() => {
+      if (document.getElementById("screen2").classList.contains("active")) {
+        STRIKE_FIELDS.forEach(field => fetchPremium(field, true));
       }
-    }, 2000);
+    }, 4000);
 
   });
 

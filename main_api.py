@@ -24,8 +24,6 @@ Run locally:
     uvicorn main_api:app --reload
 """
 import os
-import threading
-import time
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -56,103 +54,6 @@ _user_name: Optional[str] = None
 
 _bot: Optional[TradingBot] = None
 _RUNNING_STATES = {"resolving", "waiting_for_market", "entering", "monitoring"}
-
-# Cache option symbols resolved from the instrument dump. The setup screen
-# refreshes LTPs frequently, so we must NOT call kite.instruments() on every
-# refresh. Symbols are stable for a given index/expiry/strike/type.
-_premium_symbol_cache = {}
-
-# ---------------- LTP cache / throttle ----------------
-#
-# Kite Connect's quote/ltp endpoint is rate-limited to roughly 1 request
-# per second. The setup screen polls every 2s AND fires a debounced call
-# on every keystroke pause -- on their own those stay under the limit, but
-# multiple browser tabs, a slow round trip overlapping the next poll tick,
-# or the account still being in a rate-limit cooldown from an earlier
-# burst can all still trip it. That surfaced to the user as "Too many
-# requests" under the strike fields even after the instrument-dump fix.
-#
-# Serving LTPs from a short-lived cache means concurrent/rapid requests
-# for the same contract within the TTL window never reach Zerodha more
-# than once, regardless of how often the frontend polls. If an upstream
-# call does fail (e.g. still mid-cooldown), we fall back to the last
-# known price instead of surfacing an error, as long as we have one.
-#
-# Caching alone isn't enough, though: without a backoff, the very next
-# poll (2s later) would just retry Zerodha again, and if a rejected
-# request still counts against the rate-limit window (as it does for
-# order endpoints), every retry re-triggers the same 429 and the
-# cooldown never gets a chance to clear. _ltp_state["backoff_until"]
-# stops that retry storm: once a call fails, we don't hit Zerodha again
-# until the backoff window passes, regardless of how often /api/quotes
-# is polled in the meantime.
-_ltp_cache = {}   # "EXCHANGE:SYMBOL" -> (timestamp, price)
-_ltp_cache_lock = threading.Lock()
-_LTP_CACHE_TTL = 1.5          # seconds
-_LTP_BACKOFF_SECONDS = 10     # cooldown after a failed upstream call
-_ltp_state = {"backoff_until": 0.0}
-
-
-def _get_ltps(kite, keys):
-    """Fetch LTPs for `keys` (list of "EXCHANGE:SYMBOL" strings), using a
-    short-lived cache so repeated/overlapping requests for the same
-    contract don't each hit Zerodha, plus a failure backoff so a rate
-    limit doesn't turn into a self-sustaining retry storm. Falls back to
-    stale cached data instead of raising whenever there's something to
-    fall back to."""
-    now = time.time()
-    result = {}
-    stale_keys = []
-
-    with _ltp_cache_lock:
-        for key in keys:
-            cached = _ltp_cache.get(key)
-            if cached and now - cached[0] < _LTP_CACHE_TTL:
-                result[key] = cached[1]
-            else:
-                stale_keys.append(key)
-
-    if not stale_keys:
-        return result
-
-    with _ltp_cache_lock:
-        in_backoff = now < _ltp_state["backoff_until"]
-        wait = round(_ltp_state["backoff_until"] - now, 1) if in_backoff else 0
-
-    def _fallback_or_raise(err):
-        missing = []
-        with _ltp_cache_lock:
-            for key in stale_keys:
-                cached = _ltp_cache.get(key)
-                if cached:
-                    result[key] = cached[1]
-                else:
-                    missing.append(key)
-        if missing:
-            raise err
-        return result
-
-    if in_backoff:
-        # Don't hit Zerodha again while we're still in the cooldown from a
-        # recent failure -- that's what was keeping the lockout alive.
-        return _fallback_or_raise(
-            RuntimeError(f"Rate limited. Retrying automatically in {wait}s.")
-        )
-
-    try:
-        fresh = kite.ltp(stale_keys)
-    except Exception as e:
-        with _ltp_cache_lock:
-            _ltp_state["backoff_until"] = time.time() + _LTP_BACKOFF_SECONDS
-        return _fallback_or_raise(e)
-
-    with _ltp_cache_lock:
-        for key in stale_keys:
-            price = fresh[key]["last_price"]
-            _ltp_cache[key] = (now, price)
-            result[key] = price
-
-    return result
 
 
 def _get_authed_kite() -> KiteConnect:
@@ -206,102 +107,12 @@ def quote(index: str, expiry: str, strike: int, option_type: str):
     key = f"{exchange}:{symbol}"
 
     try:
-        ltp_values = _get_ltps(kite, [key])
+        ltp_data = kite.ltp(key)
+        ltp = ltp_data[key]["last_price"]
     except Exception as e:
         raise HTTPException(502, f"Could not fetch LTP: {e}")
 
-    return {"symbol": symbol, "ltp": ltp_values[key]}
-
-
-@app.get("/api/quotes")
-def quotes(
-    index: str,
-    expiry: str,
-    buy_ce_strike: Optional[int] = None,
-    buy_pe_strike: Optional[int] = None,
-    sell_ce_strike: Optional[int] = None,
-    sell_pe_strike: Optional[int] = None,
-):
-    """
-    Fetch live LTPs for all entered setup-screen strikes in ONE Zerodha
-    request. This endpoint is intentionally separate from /api/quote so the
-    older single-quote endpoint remains available for compatibility.
-
-    The dashboard calls this endpoint roughly every 2 seconds. Contract
-    symbols are resolved once and cached; subsequent refreshes only call
-    kite.ltp() with the already-resolved symbols, and even those calls are
-    throttled through _get_ltps() rather than hitting Zerodha every time.
-    """
-    if index not in ("SENSEX", "NIFTY"):
-        raise HTTPException(400, "index must be SENSEX or NIFTY")
-
-    requested = {
-        "BUY_CE": buy_ce_strike,
-        "BUY_PE": buy_pe_strike,
-        "SELL_CE": sell_ce_strike,
-        "SELL_PE": sell_pe_strike,
-    }
-    requested = {leg: strike for leg, strike in requested.items() if strike is not None}
-
-    if not requested:
-        return {"quotes": {}}
-
-    kite = _get_authed_kite()
-
-    # Resolve only symbols we have not already cached.
-    missing = {
-        leg: strike
-        for leg, strike in requested.items()
-        if (index, expiry, strike, leg.split("_")[1]) not in _premium_symbol_cache
-    }
-
-    if missing:
-        kwargs = {
-            "buy_ce_strike": missing.get("BUY_CE"),
-            "buy_pe_strike": missing.get("BUY_PE"),
-            "sell_ce_strike": missing.get("SELL_CE"),
-            "sell_pe_strike": missing.get("SELL_PE"),
-        }
-        try:
-            legs, exchange = resolve_multi_leg_symbols(kite, index, expiry, **kwargs)
-        except Exception as e:
-            raise HTTPException(400, str(e))
-
-        for leg, info in legs.items():
-            strike = requested.get(leg)
-            if strike is not None:
-                option_type = "CE" if leg.endswith("_CE") else "PE"
-                _premium_symbol_cache[(index, expiry, strike, option_type)] = (
-                    exchange, info["symbol"]
-                )
-
-    # Build one LTP request for every unique contract.
-    keys_by_leg = {}
-    keys = []
-    for leg, strike in requested.items():
-        option_type = "CE" if leg.endswith("_CE") else "PE"
-        cached = _premium_symbol_cache.get((index, expiry, strike, option_type))
-        if not cached:
-            raise HTTPException(400, f"Could not resolve {index} {strike} {option_type}")
-        exchange, symbol = cached
-        key = f"{exchange}:{symbol}"
-        keys_by_leg[leg] = (key, symbol)
-        if key not in keys:
-            keys.append(key)
-
-    try:
-        ltp_values = _get_ltps(kite, keys)
-    except Exception as e:
-        raise HTTPException(502, f"Could not fetch LTPs: {e}")
-
-    result = {}
-    for leg, (key, symbol) in keys_by_leg.items():
-        result[leg] = {
-            "symbol": symbol,
-            "ltp": ltp_values[key],
-        }
-
-    return {"quotes": result}
+    return {"symbol": symbol, "ltp": ltp}
 
 
 # ---------------- Zerodha login ----------------

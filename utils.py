@@ -1,73 +1,11 @@
 # utils.py
 from datetime import datetime
-import threading
-import time
-
 import pandas as pd
 import pytz
-
 IST = pytz.timezone("Asia/Kolkata")
 
-# ---------------- instrument dump cache ----------------
-#
-# kite.instruments(exchange) returns EVERY contract on that exchange --
-# tens of thousands of rows -- and used to get called on every single
-# strike lookup here. That's fine once, but the dashboard's live-premium
-# polling (every 2s, plus a debounced call on every keystroke) turned
-# "once" into "dozens of times a minute", which is what was tripping
-# Zerodha's rate limit and surfacing as "Too many requests" in the UI.
-#
-# The instrument list only changes once a day (new contracts get listed
-# at day start), so it's cached per exchange per calendar day instead of
-# being re-fetched on every lookup.
-_instrument_cache = {}            # exchange -> (date, DataFrame)
-_instrument_backoff_until = {}    # exchange -> unix timestamp
-_instrument_cache_lock = threading.Lock()
-
-# If a fetch fails (almost always a rate limit), don't retry on the very
-# next request -- that just re-triggers the same 429 every poll tick and
-# keeps the cooldown alive indefinitely. Back off for a stretch instead.
-_INSTRUMENT_BACKOFF_SECONDS = 15
-
-
-def _get_instruments_df(kite, exchange):
-    today = datetime.now(IST).date()
-    now = time.time()
-
-    with _instrument_cache_lock:
-        cached = _instrument_cache.get(exchange)
-        if cached and cached[0] == today:
-            return cached[1]
-
-        backoff_until = _instrument_backoff_until.get(exchange, 0)
-        if now < backoff_until:
-            wait = round(backoff_until - now, 1)
-            raise RuntimeError(
-                f"Instrument list temporarily unavailable (rate limited). "
-                f"Retrying automatically in {wait}s -- not retrying immediately "
-                f"to avoid keeping the rate limit tripped."
-            )
-
-    # Fetch outside the lock -- it's a slow network call, and blocking
-    # every other in-flight request on it (including ones for a different
-    # exchange) is worse than the rare case of two threads both fetching
-    # once on a cache-cold start.
-    try:
-        df = pd.DataFrame(kite.instruments(exchange))
-    except Exception:
-        with _instrument_cache_lock:
-            _instrument_backoff_until[exchange] = time.time() + _INSTRUMENT_BACKOFF_SECONDS
-        raise
-
-    with _instrument_cache_lock:
-        _instrument_cache[exchange] = (today, df)
-        _instrument_backoff_until.pop(exchange, None)
-
-    return df
-
-
 def resolve_ce_pe_by_strikes(kite, call_strike, put_strike):
-    instruments = _get_instruments_df(kite, "BFO")
+    instruments = pd.DataFrame(kite.instruments("BFO"))
 
     sensex_opts = instruments[instruments["tradingsymbol"].str.startswith("SENSEX")]
 
@@ -147,7 +85,7 @@ def resolve_multi_leg_symbols(kite, index, expiry_str, buy_ce_strike=None, buy_p
     except ValueError:
         raise ValueError(f"Expiry '{expiry_str}' is not in YYYY-MM-DD format.")
 
-    instruments = _get_instruments_df(kite, exchange)
+    instruments = pd.DataFrame(kite.instruments(exchange))
     opts = instruments[instruments["tradingsymbol"].str.startswith(index)]
     opts = opts[opts["expiry"] == expiry_date]
 
