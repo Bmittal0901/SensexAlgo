@@ -1,11 +1,50 @@
 # utils.py
 from datetime import datetime
+import threading
+
 import pandas as pd
 import pytz
+
 IST = pytz.timezone("Asia/Kolkata")
 
+# ---------------- instrument dump cache ----------------
+#
+# kite.instruments(exchange) returns EVERY contract on that exchange --
+# tens of thousands of rows -- and used to get called on every single
+# strike lookup here. That's fine once, but the dashboard's live-premium
+# polling (every 2s, plus a debounced call on every keystroke) turned
+# "once" into "dozens of times a minute", which is what was tripping
+# Zerodha's rate limit and surfacing as "Too many requests" in the UI.
+#
+# The instrument list only changes once a day (new contracts get listed
+# at day start), so it's cached per exchange per calendar day instead of
+# being re-fetched on every lookup.
+_instrument_cache = {}   # exchange -> (date, DataFrame)
+_instrument_cache_lock = threading.Lock()
+
+
+def _get_instruments_df(kite, exchange):
+    today = datetime.now(IST).date()
+
+    with _instrument_cache_lock:
+        cached = _instrument_cache.get(exchange)
+        if cached and cached[0] == today:
+            return cached[1]
+
+    # Fetch outside the lock -- it's a slow network call, and blocking
+    # every other in-flight request on it (including ones for a different
+    # exchange) is worse than the rare case of two threads both fetching
+    # once on a cache-cold start.
+    df = pd.DataFrame(kite.instruments(exchange))
+
+    with _instrument_cache_lock:
+        _instrument_cache[exchange] = (today, df)
+
+    return df
+
+
 def resolve_ce_pe_by_strikes(kite, call_strike, put_strike):
-    instruments = pd.DataFrame(kite.instruments("BFO"))
+    instruments = _get_instruments_df(kite, "BFO")
 
     sensex_opts = instruments[instruments["tradingsymbol"].str.startswith("SENSEX")]
 
@@ -85,7 +124,7 @@ def resolve_multi_leg_symbols(kite, index, expiry_str, buy_ce_strike=None, buy_p
     except ValueError:
         raise ValueError(f"Expiry '{expiry_str}' is not in YYYY-MM-DD format.")
 
-    instruments = pd.DataFrame(kite.instruments(exchange))
+    instruments = _get_instruments_df(kite, exchange)
     opts = instruments[instruments["tradingsymbol"].str.startswith(index)]
     opts = opts[opts["expiry"] == expiry_date]
 
