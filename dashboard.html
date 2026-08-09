@@ -240,40 +240,33 @@
         <label>Expiry</label>
         <input type="date" id="expiry"/>
       </div>
-      <div class="form-group">
-        <label>Buy CE Strike</label>
-        <input type="number" id="buy_ce_strike" placeholder="e.g. 82500"/>
-      </div>
-      <div class="form-group">
-        <label>Buy PE Strike</label>
-        <input type="number" id="buy_pe_strike" placeholder="e.g. 82500"/>
-      </div>
 
+      <!-- SELL: two strikes on one line, one shared lots field below -->
       <div class="form-group">
-        <label>Buy CE Lots</label>
-        <input type="number" id="buy_ce_lots" value="0" min="0"/>
+        <label>Sell PE Strike</label>
+        <input type="number" id="sell_pe_strike" placeholder="e.g. 78500"/>
       </div>
-      <div class="form-group">
-        <label>Buy PE Lots</label>
-        <input type="number" id="buy_pe_lots" value="0" min="0"/>
-      </div>
-
       <div class="form-group">
         <label>Sell CE Strike</label>
         <input type="number" id="sell_ce_strike" placeholder="e.g. 83000"/>
       </div>
-      <div class="form-group">
-        <label>Sell PE Strike</label>
-        <input type="number" id="sell_pe_strike" placeholder="e.g. 82000"/>
+      <div class="form-group" style="grid-column:1/3">
+        <label>Sell Lots</label>
+        <input type="number" id="sell_lots" value="0" min="0"/>
       </div>
 
+      <!-- BUY: two strikes on one line, one shared lots field below -->
       <div class="form-group">
-        <label>Sell CE Lots</label>
-        <input type="number" id="sell_ce_lots" value="0" min="0"/>
+        <label>Buy PE Strike</label>
+        <input type="number" id="buy_pe_strike" placeholder="e.g. 82500"/>
       </div>
       <div class="form-group">
-        <label>Sell PE Lots</label>
-        <input type="number" id="sell_pe_lots" value="0" min="0"/>
+        <label>Buy CE Strike</label>
+        <input type="number" id="buy_ce_strike" placeholder="e.g. 82500"/>
+      </div>
+      <div class="form-group" style="grid-column:1/3">
+        <label>Buy Lots</label>
+        <input type="number" id="buy_lots" value="0" min="0"/>
       </div>
     </div>
     <div class="section-label">Strategy Parameters</div>
@@ -330,6 +323,11 @@
           lotInput.value = 65;
         }
       }
+
+      // document.getElementById("buy_lots").addEventListener("input", function() {
+      //   const v = parseInt(this.value) || 0;
+      //   document.getElementById("sell_lots_display").value = v * 3;
+      // });
 
       document.getElementById("index").addEventListener("change", updateLotSize);
 
@@ -625,10 +623,15 @@
     ) || 50;    
     const targetProfit = Number(document.getElementById("targetProfit").value) || null;
 
-    const buyCeLots = parseInt(document.getElementById("buy_ce_lots").value) || 0;
-    const buyPeLots = parseInt(document.getElementById("buy_pe_lots").value) || 0;
-    const sellCeLots = parseInt(document.getElementById("sell_ce_lots").value) || 0;
-    const sellPeLots = parseInt(document.getElementById("sell_pe_lots").value) || 0;
+    // One shared lot field for BUY legs and one shared lot field for SELL legs.
+    // The same lot count is sent to both CE and PE when their strike is entered.
+    const buyLots = parseInt(document.getElementById("buy_lots").value) || 0;
+    const sellLots = parseInt(document.getElementById("sell_lots").value) || 0;
+    const buyCeLots = buyLots;
+    const buyPeLots = buyLots;
+    const sellCeLots = sellLots;
+    const sellPeLots = sellLots;
+
     const config = {
       index:          document.getElementById("index").value,
       expiry:         document.getElementById("expiry").value,
@@ -663,38 +666,22 @@ if (
 }
 
 // ---------- BUY ----------
-if (config.buy_ce_strike && buyCeLots <= 0) {
-    err.textContent = "Buy CE lots must be greater than 0.";
+if ((config.buy_ce_strike || config.buy_pe_strike) && buyLots <= 0) {
+    err.textContent = "Buy lots must be greater than 0.";
     return;
 }
-if (config.buy_pe_strike && buyPeLots <= 0) {
-    err.textContent = "Buy PE lots must be greater than 0.";
-    return;
-}
-if (!config.buy_ce_strike && buyCeLots > 0) {
-    err.textContent = "Enter Buy CE strike before setting Buy CE lots.";
-    return;
-}
-if (!config.buy_pe_strike && buyPeLots > 0) {
-    err.textContent = "Enter Buy PE strike before setting Buy PE lots.";
+if (!config.buy_ce_strike && !config.buy_pe_strike && buyLots > 0) {
+    err.textContent = "Enter at least one Buy CE/PE strike before setting Buy Lots.";
     return;
 }
 
 // ---------- SELL ----------
-if (config.sell_ce_strike && sellCeLots <= 0) {
-    err.textContent = "Sell CE lots must be greater than 0.";
+if ((config.sell_ce_strike || config.sell_pe_strike) && sellLots <= 0) {
+    err.textContent = "Sell lots must be greater than 0.";
     return;
 }
-if (config.sell_pe_strike && sellPeLots <= 0) {
-    err.textContent = "Sell PE lots must be greater than 0.";
-    return;
-}
-if (!config.sell_ce_strike && sellCeLots > 0) {
-    err.textContent = "Enter Sell CE strike before setting Sell CE lots.";
-    return;
-}
-if (!config.sell_pe_strike && sellPeLots > 0) {
-    err.textContent = "Enter Sell PE strike before setting Sell PE lots.";
+if (!config.sell_ce_strike && !config.sell_pe_strike && sellLots > 0) {
+    err.textContent = "Enter at least one Sell CE/PE strike before setting Sell Lots.";
     return;
 }
 
