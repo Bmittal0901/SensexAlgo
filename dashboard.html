@@ -1042,22 +1042,22 @@ else {
     ];
 
     let premiumTimer = null;
+    let premiumRefreshTimer = null;
+    let premiumRequestRunning = false;
 
     function fetchPremium(field, silent) {
       const hint = document.getElementById(field.id + "_premium");
-      const strikeVal = document.getElementById(field.id).value;
+      const strikeVal = document.getElementById(field.id).value.trim();
       const indexVal = document.getElementById("index").value;
       const expiryVal = document.getElementById("expiry").value;
 
+      // Never call /quote for an empty strike.
       if (!strikeVal || !indexVal || !expiryVal) {
         hint.textContent = "";
         hint.className = "premium-hint";
-        return;
+        return Promise.resolve();
       }
 
-      // On auto-refresh ticks, leave the last known value showing instead
-      // of flashing "Loading…" every few seconds -- only the manual/typed
-      // path shows the loading state.
       if (!silent) {
         hint.textContent = "Loading…";
         hint.className = "premium-hint";
@@ -1068,8 +1068,11 @@ else {
         + `&strike=${encodeURIComponent(strikeVal)}`
         + `&option_type=${field.type}`;
 
-      fetch(url)
-        .then(res => res.ok ? res.json() : res.json().then(d => { throw new Error(d.detail || "Not found"); }))
+      return fetch(url)
+        .then(res => res.ok
+          ? res.json()
+          : res.json().then(d => { throw new Error(d.detail || "Not found"); })
+        )
         .then(data => {
           hint.textContent = "Premium: ₹" + Number(data.ltp).toLocaleString("en-IN", {minimumFractionDigits: 2});
           hint.className = "premium-hint loaded";
@@ -1080,11 +1083,30 @@ else {
         });
     }
 
+    // Fetch entered strikes one at a time. This prevents several quote
+    // requests from hitting Zerodha simultaneously and causing 429/
+    // "Too many requests" errors on mobile or while typing.
+    async function fetchEnteredPremiums(silent = false) {
+      if (premiumRequestRunning) return;
+      premiumRequestRunning = true;
+
+      try {
+        for (const field of STRIKE_FIELDS) {
+          const input = document.getElementById(field.id);
+          if (!input || !input.value.trim()) continue;
+
+          await fetchPremium(field, silent);
+          // Small gap between quote calls so they are not bursty.
+          await new Promise(resolve => setTimeout(resolve, 350));
+        }
+      } finally {
+        premiumRequestRunning = false;
+      }
+    }
+
     function scheduleAllPremiums() {
       clearTimeout(premiumTimer);
-      premiumTimer = setTimeout(() => {
-        STRIKE_FIELDS.forEach(field => fetchPremium(field, false));
-      }, 500);
+      premiumTimer = setTimeout(() => fetchEnteredPremiums(false), 800);
     }
 
     STRIKE_FIELDS.forEach(field => {
@@ -1093,14 +1115,14 @@ else {
     document.getElementById("index").addEventListener("change", scheduleAllPremiums);
     document.getElementById("expiry").addEventListener("change", scheduleAllPremiums);
 
-    // Auto-refresh every 4s while the setup screen is actually visible, so
-    // premiums track the live market instead of freezing at whatever they
-    // were the moment you finished typing.
-    setInterval(() => {
-      if (document.getElementById("screen2").classList.contains("active")) {
-        STRIKE_FIELDS.forEach(field => fetchPremium(field, true));
+    // Refresh entered-strike premiums every 10 seconds while the setup
+    // screen is visible. Only non-empty strike fields are requested.
+    premiumRefreshTimer = setInterval(() => {
+      const screen = document.getElementById("screen2");
+      if (screen && screen.classList.contains("active")) {
+        fetchEnteredPremiums(true);
       }
-    }, 4000);
+    }, 1000);
 
   });
 
