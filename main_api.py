@@ -24,6 +24,8 @@ Run locally:
     uvicorn main_api:app --reload
 """
 import os
+import threading
+import time
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -59,6 +61,74 @@ _RUNNING_STATES = {"resolving", "waiting_for_market", "entering", "monitoring"}
 # refreshes LTPs frequently, so we must NOT call kite.instruments() on every
 # refresh. Symbols are stable for a given index/expiry/strike/type.
 _premium_symbol_cache = {}
+
+# ---------------- LTP cache / throttle ----------------
+#
+# Kite Connect's quote/ltp endpoint is rate-limited to roughly 1 request
+# per second. The setup screen polls every 2s AND fires a debounced call
+# on every keystroke pause -- on their own those stay under the limit, but
+# multiple browser tabs, a slow round trip overlapping the next poll tick,
+# or the account still being in a rate-limit cooldown from an earlier
+# burst can all still trip it. That surfaced to the user as "Too many
+# requests" under the strike fields even after the instrument-dump fix.
+#
+# Serving LTPs from a short-lived cache means concurrent/rapid requests
+# for the same contract within the TTL window never reach Zerodha more
+# than once, regardless of how often the frontend polls. If an upstream
+# call does fail (e.g. still mid-cooldown), we fall back to the last
+# known price instead of surfacing an error, as long as we have one.
+_ltp_cache = {}   # "EXCHANGE:SYMBOL" -> (timestamp, price)
+_ltp_cache_lock = threading.Lock()
+_LTP_CACHE_TTL = 1.5  # seconds
+
+
+def _get_ltps(kite, keys):
+    """Fetch LTPs for `keys` (list of "EXCHANGE:SYMBOL" strings), using a
+    short-lived cache so repeated/overlapping requests for the same
+    contract don't each hit Zerodha. Falls back to stale cached data
+    instead of raising if the upstream call fails and we have something
+    to fall back to."""
+    now = time.time()
+    result = {}
+    stale_keys = []
+
+    with _ltp_cache_lock:
+        for key in keys:
+            cached = _ltp_cache.get(key)
+            if cached and now - cached[0] < _LTP_CACHE_TTL:
+                result[key] = cached[1]
+            else:
+                stale_keys.append(key)
+
+    if not stale_keys:
+        return result
+
+    try:
+        fresh = kite.ltp(stale_keys)
+    except Exception:
+        # Upstream call failed (rate limit, transient network issue, ...).
+        # Serve whatever we last saw for these keys rather than erroring
+        # out the whole request; only re-raise if we have nothing at all
+        # to fall back to for one of them.
+        with _ltp_cache_lock:
+            missing = []
+            for key in stale_keys:
+                cached = _ltp_cache.get(key)
+                if cached:
+                    result[key] = cached[1]
+                else:
+                    missing.append(key)
+        if missing:
+            raise
+        return result
+
+    with _ltp_cache_lock:
+        for key in stale_keys:
+            price = fresh[key]["last_price"]
+            _ltp_cache[key] = (now, price)
+            result[key] = price
+
+    return result
 
 
 def _get_authed_kite() -> KiteConnect:
@@ -112,12 +182,11 @@ def quote(index: str, expiry: str, strike: int, option_type: str):
     key = f"{exchange}:{symbol}"
 
     try:
-        ltp_data = kite.ltp(key)
-        ltp = ltp_data[key]["last_price"]
+        ltp_values = _get_ltps(kite, [key])
     except Exception as e:
         raise HTTPException(502, f"Could not fetch LTP: {e}")
 
-    return {"symbol": symbol, "ltp": ltp}
+    return {"symbol": symbol, "ltp": ltp_values[key]}
 
 
 @app.get("/api/quotes")
@@ -136,7 +205,8 @@ def quotes(
 
     The dashboard calls this endpoint roughly every 2 seconds. Contract
     symbols are resolved once and cached; subsequent refreshes only call
-    kite.ltp() with the already-resolved symbols.
+    kite.ltp() with the already-resolved symbols, and even those calls are
+    throttled through _get_ltps() rather than hitting Zerodha every time.
     """
     if index not in ("SENSEX", "NIFTY"):
         raise HTTPException(400, "index must be SENSEX or NIFTY")
@@ -196,7 +266,7 @@ def quotes(
             keys.append(key)
 
     try:
-        ltp_data = kite.ltp(keys)
+        ltp_values = _get_ltps(kite, keys)
     except Exception as e:
         raise HTTPException(502, f"Could not fetch LTPs: {e}")
 
@@ -204,7 +274,7 @@ def quotes(
     for leg, (key, symbol) in keys_by_leg.items():
         result[leg] = {
             "symbol": symbol,
-            "ltp": ltp_data[key]["last_price"],
+            "ltp": ltp_values[key],
         }
 
     return {"quotes": result}
