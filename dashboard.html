@@ -1033,71 +1033,114 @@ else {
     });
 
     // ---------------- Live premium while filling in strikes (setup screen) ----------------
-    // Keep this section: it fetches live Zerodha LTPs for all entered strikes.
+    // One backend request updates all entered strikes. The backend then makes
+    // one kite.ltp() call for all unique contracts. This avoids the old
+    // one-request-per-strike pattern that caused Zerodha 429 / "Too many
+    // requests" errors.
     const STRIKE_FIELDS = [
-      { id: "sell_pe_strike", type: "PE" },
-      { id: "sell_ce_strike", type: "CE" },
-      { id: "buy_ce_strike",  type: "CE" },
-      { id: "buy_pe_strike",  type: "PE" },
+      { id: "sell_pe_strike", leg: "SELL_PE" },
+      { id: "sell_ce_strike", leg: "SELL_CE" },
+      { id: "buy_pe_strike",  leg: "BUY_PE" },
+      { id: "buy_ce_strike",  leg: "BUY_CE" },
     ];
 
     let premiumTimer = null;
     let premiumRefreshTimer = null;
     let premiumRequestRunning = false;
 
-    function fetchPremium(field, silent) {
-      const hint = document.getElementById(field.id + "_premium");
-      const strikeVal = document.getElementById(field.id).value.trim();
-      const indexVal = document.getElementById("index").value;
-      const expiryVal = document.getElementById("expiry").value;
-
-      // Never call /quote for an empty strike.
-      if (!strikeVal || !indexVal || !expiryVal) {
-        hint.textContent = "";
-        hint.className = "premium-hint";
-        return Promise.resolve();
-      }
-
-      if (!silent) {
-        hint.textContent = "Loading…";
-        hint.className = "premium-hint";
-      }
-
-      const url = `${API}/quote?index=${encodeURIComponent(indexVal)}`
-        + `&expiry=${encodeURIComponent(expiryVal)}`
-        + `&strike=${encodeURIComponent(strikeVal)}`
-        + `&option_type=${field.type}`;
-
-      return fetch(url)
-        .then(res => res.ok
-          ? res.json()
-          : res.json().then(d => { throw new Error(d.detail || "Not found"); })
-        )
-        .then(data => {
-          hint.textContent = "Premium: ₹" + Number(data.ltp).toLocaleString("en-IN", {minimumFractionDigits: 2});
-          hint.className = "premium-hint loaded";
-        })
-        .catch(err => {
-          hint.textContent = typeof err.message === "string" ? err.message : "Could not fetch premium";
-          hint.className = "premium-hint err";
-        });
-    }
-
-    // Fetch entered strikes one at a time. This prevents several quote
-    // requests from hitting Zerodha simultaneously and causing 429/
-    // "Too many requests" errors on mobile or while typing.
     async function fetchEnteredPremiums(silent = false) {
       if (premiumRequestRunning) return;
+
+      const indexVal = document.getElementById("index").value;
+      const expiryVal = document.getElementById("expiry").value;
+      if (!indexVal || !expiryVal) return;
+
+      const params = new URLSearchParams({
+        index: indexVal,
+        expiry: expiryVal,
+      });
+
+      let hasStrike = false;
+      for (const field of STRIKE_FIELDS) {
+        const input = document.getElementById(field.id);
+        const value = input ? input.value.trim() : "";
+        if (value) {
+          params.set(field.id, value);
+          hasStrike = true;
+        }
+      }
+
+      if (!hasStrike) {
+        STRIKE_FIELDS.forEach(field => {
+          const hint = document.getElementById(field.id + "_premium");
+          if (hint) {
+            hint.textContent = "";
+            hint.className = "premium-hint";
+          }
+        });
+        return;
+      }
+
       premiumRequestRunning = true;
 
-      try {
-        for (const field of STRIKE_FIELDS) {
+      if (!silent) {
+        STRIKE_FIELDS.forEach(field => {
           const input = document.getElementById(field.id);
-          if (!input || !input.value.trim()) continue;
+          const hint = document.getElementById(field.id + "_premium");
+          if (input && input.value.trim() && hint) {
+            hint.textContent = "Loading…";
+            hint.className = "premium-hint";
+          }
+        });
+      }
 
-          await fetchPremium(field, silent);
-          // Small gap between quote calls so they are not bursty.
-          await new Promise(resolve => setTimeout(resolve, 350));
+      try {
+        const res = await fetch(`${API}/quotes?${params.toString()}`);
+        const data = res.ok
+          ? await res.json()
+          : await res.json().then(d => {
+              throw new Error(d.detail || "Could not fetch premiums");
+            });
+
+        const quotes = data.quotes || {};
+
+        STRIKE_FIELDS.forEach(field => {
+          const input = document.getElementById(field.id);
+          const hint = document.getElementById(field.id + "_premium");
+          if (!input || !hint || !input.value.trim()) {
+            if (hint) {
+              hint.textContent = "";
+              hint.className = "premium-hint";
+            }
+            return;
+          }
+
+          const quote = quotes[field.leg];
+          if (quote && quote.ltp != null) {
+            hint.textContent = "Premium: ₹" + Number(quote.ltp).toLocaleString(
+              "en-IN",
+              {minimumFractionDigits: 2}
+            );
+            hint.className = "premium-hint loaded";
+          } else {
+            hint.textContent = "Could not fetch premium";
+            hint.className = "premium-hint err";
+          }
+        });
+      } catch (err) {
+        // During silent refresh keep the previous good premium visible instead
+        // of replacing it with an error/loading message.
+        if (!silent) {
+          STRIKE_FIELDS.forEach(field => {
+            const input = document.getElementById(field.id);
+            const hint = document.getElementById(field.id + "_premium");
+            if (input && input.value.trim() && hint) {
+              hint.textContent = typeof err.message === "string"
+                ? err.message
+                : "Could not fetch premiums";
+              hint.className = "premium-hint err";
+            }
+          });
         }
       } finally {
         premiumRequestRunning = false;
@@ -1106,23 +1149,26 @@ else {
 
     function scheduleAllPremiums() {
       clearTimeout(premiumTimer);
-      premiumTimer = setTimeout(() => fetchEnteredPremiums(false), 800);
+      // Wait until the user pauses typing before making the request.
+      premiumTimer = setTimeout(() => fetchEnteredPremiums(false), 600);
     }
 
     STRIKE_FIELDS.forEach(field => {
-      document.getElementById(field.id).addEventListener("input", scheduleAllPremiums);
+      const input = document.getElementById(field.id);
+      if (input) input.addEventListener("input", scheduleAllPremiums);
     });
+
     document.getElementById("index").addEventListener("change", scheduleAllPremiums);
     document.getElementById("expiry").addEventListener("change", scheduleAllPremiums);
 
-    // Refresh entered-strike premiums every 10 seconds while the setup
-    // screen is visible. Only non-empty strike fields are requested.
+    // Refresh entered-strike premiums every 2 seconds while the setup
+    // screen is visible. All entered strikes are updated in ONE API call.
     premiumRefreshTimer = setInterval(() => {
       const screen = document.getElementById("screen2");
       if (screen && screen.classList.contains("active")) {
         fetchEnteredPremiums(true);
       }
-    }, 1000);
+    }, 2000);
 
   });
 
