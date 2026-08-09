@@ -76,10 +76,6 @@
     .user-sub { font-size:11px; color:var(--muted); margin-left:auto; }
 
     .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
-    .strike-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
-    .premium-hint { font-family:var(--mono); font-size:11px; color:var(--muted); min-height:15px; }
-    .premium-hint.loaded { color:var(--accent); }
-    .premium-hint.err { color:var(--red); }
     .form-group { display:flex; flex-direction:column; gap:7px; }
     .form-group label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.8px; font-weight:500; }
     .form-group input, .form-group select { background:var(--surface2); border:1px solid var(--border); border-radius:10px; color:var(--text); padding:11px 14px; font-size:14px; font-family:var(--sans); outline:none; transition:border-color 0.2s,box-shadow 0.2s; width:100%; }
@@ -127,8 +123,7 @@
 
     .dash-grid { padding:20px; display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:1; }
 
-    .status-bar { grid-column:1/3; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 24px; display:flex; flex-direction:column; gap:16px; }
-    .status-bar-row { display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+    .status-bar { grid-column:1/3; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 24px; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
     .status-pill { display:flex; align-items:center; gap:10px; }
     .pulse-dot { width:10px; height:10px; border-radius:50%; background:var(--red); flex-shrink:0; }
     .pulse-dot.on { background:var(--green); animation:pulse-anim 1.5s infinite; }
@@ -151,12 +146,6 @@
     .stop-btn:disabled { opacity:0.3; cursor:not-allowed; }
     .exit-btn{background:#dc3545;color:white;padding:9px 22px;border-radius:8px;font-family:var(--mono);font-size:11px;letter-spacing:1px;cursor:pointer;transition:all 0.2s;border:none;}
     .exit-btn:hover{background:#bb2d3b;}
-    .exit-btn:disabled { opacity:0.3; cursor:not-allowed; }
-
-    .risk-row { display:flex; flex-direction:column; gap:14px; padding-top:16px; border-top:1px solid var(--border); }
-    .risk-inputs { display:flex; gap:10px; }
-    .risk-inputs .form-group { flex:1; min-width:0; margin-bottom:0; }
-
     .pos-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; position:relative; overflow:hidden; }
     .pos-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--border2),transparent); }
     .pos-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
@@ -193,11 +182,6 @@
       .status-bar, .log-panel { grid-column:1; }
       .card { padding:28px 20px; }
       .form-grid { grid-template-columns:1fr; }
-      .risk-inputs { gap:8px; }
-      .risk-inputs .form-group label { font-size:9px; }
-      .risk-inputs input { padding:9px 8px; font-size:12px; }
-      .strike-grid { gap:8px; }
-      .strike-grid input { padding:9px 8px; font-size:12px; }
     }
   </style>
 </head>
@@ -256,56 +240,62 @@
         <label>Expiry</label>
         <input type="date" id="expiry"/>
       </div>
-    </div>
-    <div class="strike-grid">
-      <div class="form-group">
-        <label>Sell PE Strike</label>
-        <input type="number" id="sell_pe_strike" placeholder="e.g. 82000"/>
-        <div class="premium-hint" id="sell_pe_strike_premium"></div>
-      </div>
-      <div class="form-group">
-        <label>Sell CE Strike</label>
-        <input type="number" id="sell_ce_strike" placeholder="e.g. 83000"/>
-        <div class="premium-hint" id="sell_ce_strike_premium"></div>
-      </div>
       <div class="form-group">
         <label>Buy CE Strike</label>
         <input type="number" id="buy_ce_strike" placeholder="e.g. 82500"/>
-        <div class="premium-hint" id="buy_ce_strike_premium"></div>
       </div>
       <div class="form-group">
         <label>Buy PE Strike</label>
         <input type="number" id="buy_pe_strike" placeholder="e.g. 82500"/>
-        <div class="premium-hint" id="buy_pe_strike_premium"></div>
+      </div>
+
+      <div class="form-group">
+        <label>Buy CE Lots</label>
+        <input type="number" id="buy_ce_lots" value="0" min="0"/>
+      </div>
+      <div class="form-group">
+        <label>Buy PE Lots</label>
+        <input type="number" id="buy_pe_lots" value="0" min="0"/>
+      </div>
+
+      <div class="form-group">
+        <label>Sell CE Strike</label>
+        <input type="number" id="sell_ce_strike" placeholder="e.g. 83000"/>
+      </div>
+      <div class="form-group">
+        <label>Sell PE Strike</label>
+        <input type="number" id="sell_pe_strike" placeholder="e.g. 82000"/>
+      </div>
+
+      <div class="form-group">
+        <label>Sell CE Lots</label>
+        <input type="number" id="sell_ce_lots" value="0" min="0"/>
+      </div>
+      <div class="form-group">
+        <label>Sell PE Lots</label>
+        <input type="number" id="sell_pe_lots" value="0" min="0"/>
       </div>
     </div>
     <div class="section-label">Strategy Parameters</div>
     <div class="form-grid" style="margin-bottom:20px">
-      <div class="form-group">
-        <label>Lot Size</label>
-          <input type="number" id="lot_size" readonly />
-      </div>
-      <div class="form-group">
-        <label>Buy Lots</label>
-        <input type="number" id="buy_lots" value="0" min="0"/>
-      </div>
-      <div class="form-group">
-        <label>Sell Lots</label>
-        <input type="number" id="sell_lots" value="0" min="0"/>
-      </div>
       <div class="form-group" style="grid-column:1/3">
+        <label>Lot Size</label>
+        <input type="number" id="lot_size" readonly />
+      </div>
+
+      <div class="form-group">
         <label>Max Combined Loss (₹)</label>
         <input type="number" id="max_loss" placeholder="e.g. 15000" min="1"/>
       </div>
-    </div>
-    <div class="section-label">Mode</div>
-    <div class="toggle-row" onclick="toggleDryRun()">
-      <div class="toggle-info">
-        <div class="t-label">Dry Run Mode</div>
-        <div class="t-sub" id="dryRunSub">ON — No real orders will be placed</div>
+      <div class="form-group">
+        <label>Target Profit (₹)</label>
+        <input type="number" id="targetProfit" min="1" placeholder="Optional"/>
       </div>
-      <div class="toggle-switch on" id="dryRunToggle"></div>
     </div>
+
+    <div class="section-label">Mode</div>
+
+    <!-- Trailing Stop Loss ABOVE Dry Run Mode -->
     <div class="toggle-row" onclick="toggleTrailingStop()">
       <div class="toggle-info">
         <div class="t-label">Trailing Stop Loss</div>
@@ -314,21 +304,17 @@
       <div class="toggle-switch" id="trailingToggle"></div>
     </div>
 
-    <div 
-    class="form-group" 
-    id="trailAmountGroup" 
-    style="display:none;" >
+    <div class="form-group" id="trailAmountGroup" style="display:none; margin-bottom:20px;">
       <label>Trail Amount (₹)</label>
       <input type="number" id="trailAmount" min="1" value="50">
     </div>
-    <div class="form-group">
-      <label>Target Profit (₹)</label>
-      <input
-          type="number"
-          id="targetProfit"
-          min="1"
-          placeholder="Optional"
-      >
+
+    <div class="toggle-row" onclick="toggleDryRun()">
+      <div class="toggle-info">
+        <div class="t-label">Dry Run Mode</div>
+        <div class="t-sub" id="dryRunSub">ON — No real orders will be placed</div>
+      </div>
+      <div class="toggle-switch on" id="dryRunToggle"></div>
     </div>
     <div class="error-msg" id="setupError"></div>
     <button class="btn-primary" id="setupBtn" onclick="handleSetup()">LAUNCH ALGO</button>
@@ -371,63 +357,35 @@
 
   <div class="dash-grid">
     <div class="status-bar">
-      <div class="status-bar-row">
-        <div class="status-pill">
-          <div class="pulse-dot" id="statusDot"></div>
-          <div class="status-lbl" id="statusText">STARTING</div>
-        </div>
-        <div class="chips">
-            <div class="chip" id="indexChip">
-                Index
-                <span id="indexVal">--</span>
-                <span id="indexLevelVal">--</span>
-            </div>
+      <div class="status-pill">
+        <div class="pulse-dot" id="statusDot"></div>
+        <div class="status-lbl" id="statusText">STARTING</div>
+      </div>
+      <div class="chips">
+          <div class="chip" id="indexChip">
+              Index
+              <span id="indexVal">--</span>
+              <span id="indexLevelVal">--</span>
+          </div>
 
-            <div class="chip">
-                Expiry
-                <span id="expiryVal">--</span>
-            </div>
           <div class="chip">
-              Max Loss
-              <span id="maxLossVal">--</span>
+              Expiry
+              <span id="expiryVal">--</span>
           </div>
-          <div class="chip">Target Profit
-              <span id="targetProfitVal">--</span>
-          </div>
+        <div class="chip">
+            Max Loss
+            <span id="maxLossVal">--</span>
         </div>
-        <button class="exit-btn" id="exitBtn" onclick="exitAlgo()"disabled>EXIT</button>
-        <div class="pnl-block">
-          <div class="pnl-lbl">COMBINED LOSS</div>
-          <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
+        <div class="chip">Target Profit
+            <span id="targetProfitVal">--</span>
         </div>
-        <button class="stop-btn" id="stopBtn" onclick="stopAlgo()"disabled>STOP</button>
       </div>
-
-      <div class="risk-row">
-        <div class="risk-inputs">
-          <div class="form-group">
-              <label>Combined Stop Loss</label>
-              <input type="number" id="liveMaxLoss">
-          </div>
-
-          <div class="form-group">
-              <label>Target Profit</label>
-              <input type="number" id="liveTarget">
-          </div>
-        </div>
-
-        <button class="btn-primary" onclick="updateRisk()">SAVE CHANGES</button>
+      <div class="pnl-block">
+        <div class="pnl-lbl">COMBINED LOSS</div>
+        <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
       </div>
-
-      <div
-        id="riskUpdateMsg"
-        style="
-            font-size:12px;
-            color:#00e676;
-            text-align:center;
-            display:none;
-          ">
-      </div>
+      <button class="stop-btn" id="stopBtn" onclick="stopAlgo()"disabled>STOP ALGO</button>
+      <button class="exit-btn" id="exitBtn" onclick="exitAlgo()"disabled>EXIT</button>
     </div>
 
     <div class="pos-card">
@@ -499,9 +457,28 @@
 
   let pollInterval = null;
   let dryRun = true;
-  let riskControlsDirty = false;
   let stopping = false;
   let lastConfig = null;   // holds the last config posted to /api/start (no token in it -- server holds the session)
+
+  // The API has no /logs endpoint (snapshot() doesn't return one), so the
+  // log panel is built client-side from status transitions we observe while polling.
+  let logLines = [];
+  let lastSeenStatus = null;
+  let lastSeenExitReason = null;
+  let lastSeenError = null;
+
+  function pushLog(line, cls) {
+    const t = new Date().toLocaleTimeString("en-IN", {timeZone: "Asia/Kolkata", hour12: false});
+    logLines.push({line, cls, t});
+    if (logLines.length > 200) logLines.shift();
+  }
+
+  function resetLogs() {
+    logLines = [];
+    lastSeenStatus = null;
+    lastSeenExitReason = null;
+    lastSeenError = null;
+  }
 
   // Clock
   function updateClock() {
@@ -648,8 +625,10 @@
     ) || 50;    
     const targetProfit = Number(document.getElementById("targetProfit").value) || null;
 
-    const buyLots = parseInt(document.getElementById("buy_lots").value) || 0;
-    const sellLots = parseInt(document.getElementById("sell_lots").value) || 0;
+    const buyCeLots = parseInt(document.getElementById("buy_ce_lots").value) || 0;
+    const buyPeLots = parseInt(document.getElementById("buy_pe_lots").value) || 0;
+    const sellCeLots = parseInt(document.getElementById("sell_ce_lots").value) || 0;
+    const sellPeLots = parseInt(document.getElementById("sell_pe_lots").value) || 0;
     const config = {
       index:          document.getElementById("index").value,
       expiry:         document.getElementById("expiry").value,
@@ -657,10 +636,10 @@
       buy_pe_strike:  parseInt(document.getElementById("buy_pe_strike").value),
       sell_ce_strike: parseInt(document.getElementById("sell_ce_strike").value),
       sell_pe_strike: parseInt(document.getElementById("sell_pe_strike").value),
-      buy_ce_lots: buyLots,
-      buy_pe_lots: buyLots,
-      sell_ce_lots: sellLots,
-      sell_pe_lots: sellLots,
+      buy_ce_lots: buyCeLots,
+      buy_pe_lots: buyPeLots,
+      sell_ce_lots: sellCeLots,
+      sell_pe_lots: sellPeLots,
       max_loss:       parseFloat(document.getElementById("max_loss").value),
       dry_run:        dryRun,
       trailing_stop_enabled: trailingStopEnabled,
@@ -684,24 +663,38 @@ if (
 }
 
 // ---------- BUY ----------
-if ((config.buy_ce_strike || config.buy_pe_strike) && buyLots <= 0) {
-    err.textContent = "Buy lots must be greater than 0.";
+if (config.buy_ce_strike && buyCeLots <= 0) {
+    err.textContent = "Buy CE lots must be greater than 0.";
     return;
 }
-
-if (!(config.buy_ce_strike || config.buy_pe_strike) && buyLots > 0) {
-    err.textContent = "Enter at least one BUY strike.";
+if (config.buy_pe_strike && buyPeLots <= 0) {
+    err.textContent = "Buy PE lots must be greater than 0.";
+    return;
+}
+if (!config.buy_ce_strike && buyCeLots > 0) {
+    err.textContent = "Enter Buy CE strike before setting Buy CE lots.";
+    return;
+}
+if (!config.buy_pe_strike && buyPeLots > 0) {
+    err.textContent = "Enter Buy PE strike before setting Buy PE lots.";
     return;
 }
 
 // ---------- SELL ----------
-if ((config.sell_ce_strike || config.sell_pe_strike) && sellLots <= 0) {
-    err.textContent = "Sell lots must be greater than 0.";
+if (config.sell_ce_strike && sellCeLots <= 0) {
+    err.textContent = "Sell CE lots must be greater than 0.";
     return;
 }
-
-if (!(config.sell_ce_strike || config.sell_pe_strike) && sellLots > 0) {
-    err.textContent = "Enter at least one SELL strike.";
+if (config.sell_pe_strike && sellPeLots <= 0) {
+    err.textContent = "Sell PE lots must be greater than 0.";
+    return;
+}
+if (!config.sell_ce_strike && sellCeLots > 0) {
+    err.textContent = "Enter Sell CE strike before setting Sell CE lots.";
+    return;
+}
+if (!config.sell_pe_strike && sellPeLots > 0) {
+    err.textContent = "Enter Sell PE strike before setting Sell PE lots.";
     return;
 }
 
@@ -729,6 +722,7 @@ if (!config.max_loss || config.max_loss < 1) {
       if (res.ok) {
         document.getElementById("dryBadge").classList.toggle("on", dryRun);
         stopping = false;
+        resetLogs();
         goToScreen(3);
         startPolling();
         btn.disabled = false;
@@ -746,62 +740,6 @@ if (!config.max_loss || config.max_loss < 1) {
     }
   }
 
-
-  async function updateRisk() {
-
-    const btn = event.target;
-    const msg = document.getElementById("riskUpdateMsg");
-
-    btn.disabled = true;
-    msg.style.display = "none";
-
-    const body = {
-        max_loss: Number(document.getElementById("liveMaxLoss").value),
-        target_profit: Number(document.getElementById("liveTarget").value) || null,
-    };
-
-    if (body.max_loss <= 0) {
-        alert("Invalid Stop Loss");
-        btn.disabled = false;
-        return;
-    }
-
-    try {
-
-        const r = await fetch(`${API}/update-risk`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(body)
-        });
-
-        if (!r.ok) {
-            alert("Unable to update.");
-            btn.disabled = false;
-            return;
-        }
-
-        await fetchStatus();
-        riskControlsDirty = false;
-
-        msg.style.display = "block";
-        msg.textContent = "✔ Risk parameters updated successfully.";
-
-        setTimeout(() => {
-            msg.style.display = "none";
-        }, 2500);
-
-    } catch (e) {
-
-        alert("Unable to connect to server.");
-
-    } finally {
-
-        btn.disabled = false;
-
-    }
-  }
   // Stop
   async function stopAlgo() {
     if (!confirm(
@@ -817,12 +755,12 @@ if (!config.max_loss || config.max_loss < 1) {
         const data = await res.json();
         alert((typeof data.detail === "string" ? data.detail : null) || "Failed to stop algo.");
         btn.disabled = false;
-        btn.textContent = "STOP";
+        btn.textContent = "STOP ALGO";
         stopping = false;
       }
     } catch(e) {
       btn.disabled = false;
-      btn.textContent = "STOP";
+      btn.textContent = "STOP ALGO";
       stopping = false;
     }
   }
@@ -887,6 +825,23 @@ if (!config.max_loss || config.max_loss < 1) {
     data.index_ltp != null
         ? Number(data.index_ltp).toLocaleString("en-IN")
         : "--";
+    if (data.status !== lastSeenStatus) {
+      pushLog(`Status -> ${STATUS_LABELS[data.status] || data.status}`, "def");
+      lastSeenStatus = data.status;
+    }
+    if (data.exit_reason && data.exit_reason !== lastSeenExitReason) {
+    const pnlTxt = "₹" + Number(data.total_pnl || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});     
+    let cls = "def";
+      if (data.exit_reason.includes("MAX LOSS") || data.exit_reason.includes("STOP LOSS")) cls = "sl";
+      else if (data.exit_reason.includes("EOD")) cls = "eod";
+      else if (data.exit_reason.includes("TARGET PROFIT")) cls = "target";
+      pushLog(`EXIT — ${data.exit_reason} | P&L ${pnlTxt}`, cls);     
+      lastSeenExitReason = data.exit_reason;
+    }
+    if (data.error_message && data.error_message !== lastSeenError) {
+      pushLog(`[ERROR] ${data.error_message}`, "error");
+      lastSeenError = data.error_message;
+    }
 
     if (running) {
 
@@ -896,7 +851,7 @@ if (!config.max_loss || config.max_loss < 1) {
 
     if (!stopping) {
         stopBtn.disabled = false;
-        stopBtn.textContent = "STOP";
+        stopBtn.textContent = "STOP ALGO";
     }
 
     exitBtn.disabled = false;
@@ -910,7 +865,7 @@ else {
     lbl.classList.remove("on");
 
     stopBtn.disabled = true;
-    stopBtn.textContent = "STOP";
+    stopBtn.textContent = "STOP ALGO";
 
     exitBtn.disabled = true;
     exitBtn.textContent = "EXIT";
@@ -931,14 +886,6 @@ else {
         data.max_loss != null
             ? "₹" + Number(data.max_loss).toLocaleString("en-IN")
             : "--";
-    
-    const liveMaxLoss = document.getElementById("liveMaxLoss");
-    const liveTarget = document.getElementById("liveTarget");
-
-    if (!riskControlsDirty) {
-      liveMaxLoss.value = data.max_loss ?? "";
-      liveTarget.value = data.target_profit ?? "";
-    }
 
     const combinedLossDisplay = document.getElementById("combinedLossDisplay");
 
@@ -973,32 +920,13 @@ else {
       updateCard(leg, info);
     });
 
-    const logs = data.logs || [];
-
-    document.getElementById("logCount").textContent =
-        logs.length + " entries";
-
+    document.getElementById("logCount").textContent = logLines.length + " entries";
     const box = document.getElementById("logBox");
-
-    const shouldAutoScroll =
-    box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
-
-    if (!logs.length) {
-
-        box.innerHTML =
-            '<span class="log-empty">No logs yet...</span>';
-
+    if (!logLines.length) {
+      box.innerHTML = '<span class="log-empty">No logs yet...</span>';
     } else {
-
-        box.innerHTML = logs.map(log => `
-            <span class="log-line ${log.level.toLowerCase()}">
-                [${log.timestamp}] ${log.message}
-            </span>
-        `).join("");
-
-        if (shouldAutoScroll) {
-          box.scrollTop = box.scrollHeight;
-        }
+      box.innerHTML = logLines.map(l => `<span class="log-line ${l.cls}">[${l.t}] ${l.line}</span>`).join("\n");
+      box.scrollTop = box.scrollHeight;
     }
   }
 
@@ -1024,89 +952,6 @@ else {
       curEl.textContent   = "--";                        curEl.className   = "r-val";
     }
   }
-
-  document.addEventListener("DOMContentLoaded", () => {
-
-    ["liveMaxLoss", "liveTarget",].forEach(id => {
-
-        document.getElementById(id).addEventListener("input", () => {
-
-            riskControlsDirty = true;
-
-        });
-
-    });
-
-    // ---------------- Live premium while filling in strikes (setup screen) ----------------
-    const STRIKE_FIELDS = [
-      { id: "sell_pe_strike", type: "PE" },
-      { id: "sell_ce_strike", type: "CE" },
-      { id: "buy_ce_strike",  type: "CE" },
-      { id: "buy_pe_strike",  type: "PE" },
-    ];
-
-    let premiumTimer = null;
-
-    function fetchPremium(field, silent) {
-      const hint = document.getElementById(field.id + "_premium");
-      const strikeVal = document.getElementById(field.id).value;
-      const indexVal = document.getElementById("index").value;
-      const expiryVal = document.getElementById("expiry").value;
-
-      if (!strikeVal || !indexVal || !expiryVal) {
-        hint.textContent = "";
-        hint.className = "premium-hint";
-        return;
-      }
-
-      // On auto-refresh ticks, leave the last known value showing instead
-      // of flashing "Loading…" every few seconds -- only the manual/typed
-      // path shows the loading state.
-      if (!silent) {
-        hint.textContent = "Loading…";
-        hint.className = "premium-hint";
-      }
-
-      const url = `${API}/quote?index=${encodeURIComponent(indexVal)}`
-        + `&expiry=${encodeURIComponent(expiryVal)}`
-        + `&strike=${encodeURIComponent(strikeVal)}`
-        + `&option_type=${field.type}`;
-
-      fetch(url)
-        .then(res => res.ok ? res.json() : res.json().then(d => { throw new Error(d.detail || "Not found"); }))
-        .then(data => {
-          hint.textContent = "Premium: ₹" + Number(data.ltp).toLocaleString("en-IN", {minimumFractionDigits: 2});
-          hint.className = "premium-hint loaded";
-        })
-        .catch(err => {
-          hint.textContent = typeof err.message === "string" ? err.message : "Could not fetch premium";
-          hint.className = "premium-hint err";
-        });
-    }
-
-    function scheduleAllPremiums() {
-      clearTimeout(premiumTimer);
-      premiumTimer = setTimeout(() => {
-        STRIKE_FIELDS.forEach(field => fetchPremium(field, false));
-      }, 500);
-    }
-
-    STRIKE_FIELDS.forEach(field => {
-      document.getElementById(field.id).addEventListener("input", scheduleAllPremiums);
-    });
-    document.getElementById("index").addEventListener("change", scheduleAllPremiums);
-    document.getElementById("expiry").addEventListener("change", scheduleAllPremiums);
-
-    // Auto-refresh every 4s while the setup screen is actually visible, so
-    // premiums track the live market instead of freezing at whatever they
-    // were the moment you finished typing.
-    setInterval(() => {
-      if (document.getElementById("screen2").classList.contains("active")) {
-        STRIKE_FIELDS.forEach(field => fetchPremium(field, true));
-      }
-    }, 2000);
-
-  });
 
   init();
 </script>
