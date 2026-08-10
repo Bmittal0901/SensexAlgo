@@ -394,7 +394,7 @@
   <div class="dash-grid">
     <div class="status-bar">
 
-      <!-- ROW 1: MONITORING + COMBINED LOSS + ACTIONS -->
+      <!-- ROW 1: MONITORING + COMBINED LOSS -->
       <div class="status-bar-row">
         <div class="status-pill">
           <div class="pulse-dot" id="statusDot"></div>
@@ -406,10 +406,7 @@
           <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
         </div>
 
-        <div class="action-group">
-          <button class="exit-btn" id="exitBtn" onclick="exitAlgo()" disabled>EXIT</button>
-          <button class="stop-btn" id="stopBtn" onclick="stopAlgo()" disabled>STOP</button>
-        </div>
+        <div></div>
       </div>
 
       <!-- ROW 2: INDEX + EXPIRY -->
@@ -425,19 +422,25 @@
         </div>
       </div>
 
-      <!-- ROW 3: TRAILING SL + TARGET PROFIT -->
+      <!-- ROW 3: TSL + TP -->
       <div class="dashboard-info-row">
         <div class="chip">
-          <span id="maxLossLabel">Max Loss</span>
+          <span id="maxLossLabel">TSL</span>
           <span id="maxLossVal">--</span>
         </div>
         <div class="chip">
-          <span>Target Profit</span>
+          <span>TP</span>
           <span id="targetProfitVal">--</span>
         </div>
       </div>
 
-      <!-- ROW 4: LIVE RISK EDITS -->
+      <!-- ROW 4: EXIT + STOP BELOW TSL/TP -->
+      <div class="status-actions">
+        <button class="exit-btn" id="exitBtn" onclick="exitAlgo()" disabled>EXIT</button>
+        <button class="stop-btn" id="stopBtn" onclick="stopAlgo()" disabled>STOP</button>
+      </div>
+
+      <!-- ROW 5: LIVE RISK EDITS -->
       <div class="risk-row">
         <div class="risk-inputs">
           <div class="form-group">
@@ -949,7 +952,7 @@ else {
     const maxLossLabel = document.getElementById("maxLossLabel");
 
     if (data.trailing_stop_enabled) {
-        maxLossLabel.textContent = "Trailing SL";
+        maxLossLabel.textContent = "TSL";
     } else {
         maxLossLabel.textContent = "Max Loss";
     }
