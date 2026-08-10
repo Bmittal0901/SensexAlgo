@@ -126,30 +126,260 @@
     .dry-badge.on { display:block; }
 
     .dash-grid { padding:20px; display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:1; }
+    .status-bar {
+      grid-column:1/3;
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:28px 24px;
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+    }
 
-    .status-bar { grid-column:1/3; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 24px; display:flex; flex-direction:column; gap:14px; }
-    .status-bar-row { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:14px; }
-    .status-pill { display:flex; align-items:center; gap:10px; }
-    .status-bar-row .pnl-block { margin-left:0; text-align:center; }
-    .status-bar-row .action-group { display:flex; justify-content:flex-end; gap:10px; }
-    .dashboard-info-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-    .dashboard-info-row .chip { min-height:42px; display:flex; align-items:center; justify-content:space-between; padding:8px 14px; }
-    .dashboard-info-row .chip span { margin-left:8px; }
-    .risk-row { display:flex; flex-direction:column; gap:14px; padding-top:14px; border-top:1px solid var(--border); }
-    .risk-inputs { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-    .risk-inputs .form-group { min-width:0; margin-bottom:0; }
-    .risk-row .btn-primary { max-width:100%; }
-    .risk-message { text-align:center; }
-    .status-actions { display:flex; justify-content:center; gap:14px; }
-    .pulse-dot { width:10px; height:10px; border-radius:50%; background:var(--red); flex-shrink:0; }
-    .pulse-dot.on { background:var(--green); animation:pulse-anim 1.5s infinite; }
-    @keyframes pulse-anim { 0%{box-shadow:0 0 0 0 rgba(0,230,118,0.4)} 70%{box-shadow:0 0 0 8px rgba(0,230,118,0)} 100%{box-shadow:0 0 0 0 rgba(0,230,118,0)} }
-    .status-lbl { font-family:var(--mono); font-size:12px; letter-spacing:1px; color:var(--red); font-weight:700; }
-    .status-lbl.on { color:var(--green); }
+    /* STATUS + COMBINED LOSS */
+    .status-bar-row {
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:24px;
+      flex-wrap:wrap;
+    }
 
-    .chips { display:flex; gap:10px; flex-wrap:wrap; }
-    .chip { background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:5px 12px; font-size:11px; color:var(--muted); }
-    .chip span { color:var(--text); margin-left:5px; font-family:var(--mono); font-size:12px; }
+    .status-pill {
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .pulse-dot {
+      width:10px;
+      height:10px;
+      border-radius:50%;
+      background:var(--red);
+      flex-shrink:0;
+    }
+
+    .pulse-dot.on {
+      background:var(--green);
+      animation:pulse-anim 1.5s infinite;
+    }
+
+    .status-lbl {
+      font-family:var(--mono);
+      font-size:12px;
+      letter-spacing:1px;
+      color:var(--red);
+      font-weight:700;
+    }
+
+    .status-lbl.on {
+      color:var(--green);
+    }
+
+    /* COMBINED LOSS */
+    .pnl-block {
+      text-align:center;
+      margin:0;
+    }
+
+    .pnl-lbl {
+      font-size:10px;
+      color:var(--muted);
+      letter-spacing:1px;
+      text-transform:uppercase;
+      margin-bottom:5px;
+    }
+
+    .pnl-val {
+      font-family:var(--mono);
+      font-size:30px;
+      font-weight:700;
+      color:var(--muted);
+      transition:color 0.3s;
+    }
+
+    .pnl-val.pos {
+      color:var(--green);
+    }
+
+    .pnl-val.neg {
+      color:var(--red);
+    }
+
+
+    /* =========================================
+      INDEX / EXPIRY / TSL / TP BOXES
+      ========================================= */
+
+    .dashboard-info-row {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:14px;
+      width:100%;
+    }
+
+    .dashboard-info-row .chip {
+      min-height:68px;
+      background:var(--surface2);
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:14px 18px;
+
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+
+      color:var(--muted);
+      font-size:12px;
+      font-family:var(--sans);
+    }
+
+    .dashboard-info-row .chip span {
+      margin-left:8px;
+      color:var(--text);
+      font-family:var(--mono);
+      font-size:14px;
+    }
+
+    .dashboard-info-row .chip span:first-of-type {
+      margin-left:auto;
+    }
+
+
+    /* =========================================
+      EXIT / STOP
+      ========================================= */
+
+    .action-group {
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:18px;
+      width:100%;
+      margin-top:2px;
+    }
+
+    .exit-btn {
+      background:#dc3545;
+      color:white;
+      padding:11px 28px;
+      border-radius:8px;
+      font-family:var(--mono);
+      font-size:11px;
+      letter-spacing:1px;
+      cursor:pointer;
+      transition:all 0.2s;
+      border:none;
+    }
+
+    .exit-btn:hover {
+      background:#bb2d3b;
+    }
+
+    .exit-btn:disabled {
+      opacity:0.3;
+      cursor:not-allowed;
+    }
+
+    .stop-btn {
+      background:transparent;
+      border:1px solid var(--red);
+      color:var(--red);
+      padding:11px 28px;
+      border-radius:8px;
+      font-family:var(--mono);
+      font-size:11px;
+      letter-spacing:1px;
+      cursor:pointer;
+      transition:all 0.2s;
+    }
+
+    .stop-btn:hover {
+      background:var(--red);
+      color:#fff;
+    }
+
+    .stop-btn:disabled {
+      opacity:0.3;
+      cursor:not-allowed;
+    }
+
+
+    /* =========================================
+      LIVE RISK CONTROLS
+      ========================================= */
+
+    .risk-row {
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      padding-top:18px;
+      border-top:1px solid var(--border);
+    }
+
+    .risk-inputs {
+      display:flex;
+      gap:14px;
+      width:100%;
+    }
+
+    .risk-inputs .form-group {
+      flex:1;
+      min-width:0;
+      margin-bottom:0;
+    }
+
+
+/* MOBILE */
+@media (max-width:600px) {
+
+  .status-bar {
+    padding:24px 18px;
+  }
+
+  .status-bar-row {
+    flex-direction:column;
+    gap:14px;
+  }
+
+  .dashboard-info-row {
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+  }
+
+  .dashboard-info-row .chip {
+    min-height:68px;
+    padding:12px 14px;
+    font-size:11px;
+  }
+
+  .dashboard-info-row .chip span {
+    font-size:12px;
+  }
+
+  .action-group {
+    gap:12px;
+  }
+
+  .exit-btn,
+  .stop-btn {
+    padding:10px 22px;
+  }
+
+  .risk-inputs {
+    gap:8px;
+  }
+
+  .risk-inputs .form-group label {
+    font-size:9px;
+  }
+
+  .risk-inputs input {
+    padding:9px 8px;
+    font-size:12px;
+  }
+}
 
     .pnl-block { margin-left:auto; text-align:right; }
     .pnl-lbl { font-size:10px; color:var(--muted); letter-spacing:1px; text-transform:uppercase; margin-bottom:4px; }
@@ -394,8 +624,9 @@
   <div class="dash-grid">
     <div class="status-bar">
 
-      <!-- ROW 1: MONITORING + COMBINED LOSS -->
+      <!-- STATUS + COMBINED LOSS -->
       <div class="status-bar-row">
+
         <div class="status-pill">
           <div class="pulse-dot" id="statusDot"></div>
           <div class="status-lbl" id="statusText">STARTING</div>
@@ -406,58 +637,118 @@
           <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
         </div>
 
-        <div></div>
       </div>
 
-      <!-- ROW 2: INDEX + EXPIRY -->
+
+      <!-- INDEX + EXPIRY -->
       <div class="dashboard-info-row">
+
         <div class="chip" id="indexChip">
           <span>Index</span>
+
           <span id="indexVal">--</span>
+
           <span id="indexLevelVal">--</span>
         </div>
+
         <div class="chip">
           <span>Expiry</span>
+
           <span id="expiryVal">--</span>
         </div>
+
       </div>
 
-      <!-- ROW 3: TSL + TP -->
+
+      <!-- TSL + TP -->
       <div class="dashboard-info-row">
+
         <div class="chip">
+
           <span id="maxLossLabel">TSL</span>
+
           <span id="maxLossVal">--</span>
+
         </div>
+
         <div class="chip">
+
           <span>TP</span>
+
           <span id="targetProfitVal">--</span>
+
         </div>
+
       </div>
 
-      <!-- ROW 4: EXIT + STOP BELOW TSL/TP -->
-      <div class="status-actions">
-        <button class="exit-btn" id="exitBtn" onclick="exitAlgo()" disabled>EXIT</button>
-        <button class="stop-btn" id="stopBtn" onclick="stopAlgo()" disabled>STOP</button>
+
+      <!-- EXIT + STOP -->
+      <div class="action-group">
+
+        <button
+          class="exit-btn"
+          id="exitBtn"
+          onclick="exitAlgo()"
+          disabled
+        >
+          EXIT
+        </button>
+
+        <button
+          class="stop-btn"
+          id="stopBtn"
+          onclick="stopAlgo()"
+          disabled
+        >
+          STOP
+        </button>
+
       </div>
 
-      <!-- ROW 5: LIVE RISK EDITS -->
+
+      <!-- LIVE RISK CONTROLS -->
       <div class="risk-row">
+
         <div class="risk-inputs">
+
           <div class="form-group">
             <label>Combined Stop Loss</label>
-            <input type="number" id="liveMaxLoss">
+            <input
+              type="number"
+              id="liveMaxLoss"
+            />
           </div>
 
           <div class="form-group">
             <label>Target Profit</label>
-            <input type="number" id="liveTarget">
+            <input
+              type="number"
+              id="liveTarget"
+            />
           </div>
+
         </div>
 
-        <button class="btn-primary" onclick="updateRisk()">SAVE CHANGES</button>
+        <button
+          class="btn-primary"
+          onclick="updateRisk()"
+        >
+          SAVE CHANGES
+        </button>
+
       </div>
 
-      <div id="riskUpdateMsg" class="risk-message" style="font-size:12px;color:#00e676;display:none;"></div>
+
+      <div
+        id="riskUpdateMsg"
+        style="
+          font-size:12px;
+          color:#00e676;
+          text-align:center;
+          display:none;
+        "
+      ></div>
+
     </div>
 
     <div class="pos-card">
