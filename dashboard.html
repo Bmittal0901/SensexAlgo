@@ -132,31 +132,42 @@
     .status-pill { display:flex; align-items:center; gap:10px; }
     .status-bar-row .pnl-block { margin-left:0; text-align:center; }
     .status-bar-row .action-group { display:flex; justify-content:flex-end; gap:10px; }
+    .dashboard-actions {
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:14px;
+      margin-top:2px;
+    }
+    .dashboard-actions button {
+      min-width:126px;
+    }
     .dashboard-info-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; width:100%; }
 
     /* Screen 3 — Index / Expiry / TSL / TP boxes */
     .dashboard-info-row .dashboard-box {
-      min-height:92px;
+      height:78px;
+      min-height:78px;
       background:var(--surface2);
       border:1px solid var(--border);
       border-radius:12px;
-      padding:14px 16px;
+      padding:9px 12px;
       display:flex;
       flex-direction:column;
       align-items:center;
       justify-content:center;
       text-align:center;
-      gap:10px;
+      gap:5px;
       box-sizing:border-box;
     }
     .dashboard-box-label {
-      font-size:12px;
+      font-size:11px;
       color:var(--muted);
       letter-spacing:0.5px;
     }
     .dashboard-box-value {
       font-family:var(--mono);
-      font-size:16px;
+      font-size:14px;
       color:var(--text);
       line-height:1.3;
       word-break:break-word;
@@ -238,9 +249,11 @@
       .status-bar-row .pnl-block { order:2; }
       .status-bar-row .action-group { justify-content:center; order:3; }
       .dashboard-info-row { grid-template-columns:1fr 1fr; gap:8px; }
-      .dashboard-info-row .dashboard-box { min-height:88px; padding:12px 8px; }
-      .dashboard-box-label { font-size:11px; }
-      .dashboard-box-value { font-size:13px; }
+      .dashboard-info-row .dashboard-box { height:74px; min-height:74px; padding:8px 7px; }
+      .dashboard-box-label { font-size:10px; }
+      .dashboard-box-value { font-size:12px; }
+      .dashboard-actions { gap:10px; margin-top:2px; }
+      .dashboard-actions button { min-width:118px; padding:9px 18px; }
       .risk-inputs { grid-template-columns:1fr 1fr; gap:8px; }
       .risk-inputs .form-group label { font-size:9px; }
       .risk-inputs input { padding:9px 8px; font-size:12px; }
@@ -436,10 +449,6 @@
           <div class="pnl-val" id="combinedLossDisplay">₹0.00</div>
         </div>
 
-        <div class="action-group">
-          <button class="exit-btn" id="exitBtn" onclick="exitAlgo()" disabled>EXIT</button>
-          <button class="stop-btn" id="stopBtn" onclick="stopAlgo()" disabled>STOP</button>
-        </div>
       </div>
 
       <!-- ROW 2: INDEX + EXPIRY -->
@@ -469,6 +478,12 @@
           <div class="dashboard-box-label">TP</div>
           <div class="dashboard-box-value" id="targetProfitVal">--</div>
         </div>
+      </div>
+
+      <!-- EXIT + STOP BELOW THE FOUR INFO BOXES -->
+      <div class="action-group dashboard-actions">
+        <button class="exit-btn" id="exitBtn" onclick="exitAlgo()" disabled>EXIT</button>
+        <button class="stop-btn" id="stopBtn" onclick="stopAlgo()" disabled>STOP</button>
       </div>
 
       <!-- ROW 4: LIVE RISK EDITS -->
