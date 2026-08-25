@@ -21,6 +21,7 @@ from strategy import (
     compute_combined_loss,
     leg_hit_stop_loss,
     leg_hit_target,
+    leg_loss_per_unit,
     should_exit,
 )
 from utils import resolve_multi_leg_symbols
@@ -46,30 +47,61 @@ class TradingBot:
     per-leg SL / optional per-leg target / EOD square-off / manual stop.
     """
 
-    def _update_index_ltp(self):
-        try:
-            if self.config["index"] == "SENSEX":
-                index_symbol = "BSE:SENSEX"
-            else:
-                index_symbol = "NSE:NIFTY 50"
-
-            quote = self.kite.ltp([index_symbol])
-            self.index_ltp = quote[index_symbol]["last_price"]
-
-        except Exception as e:
-            print(f"Index LTP Error: {e}")
     def __init__(self, kite, config: dict):
         """
         config keys:
           index, expiry, buy_ce_strike, buy_pe_strike, sell_ce_strike,
           sell_pe_strike, buy_lots, lot_size, max_loss  (required)
           per_leg_stop_loss, per_leg_target              (optional, rupees)
-          square_off_time                                (optional, "HH:MM" IST, default "15:20")
           dry_run                                         (optional, defaults to env_dry_run())
         """
         self.trailing_stop_enabled = config.get("trailing_stop_enabled",False)
         self.trail_amount = config.get("trail_amount",50)
         self.target_profit = config.get("target_profit")
+
+        # Staged partial profit booking: exit 1/3 of each leg's lots at
+        # each of 3 thresholds, expressed as a fraction of the net credit
+        # collected at entry (the "max profit" reference, fixed once
+        # entry completes -- see _compute_max_theoretical_profit).
+        self.staged_exit_enabled = config.get("staged_exit_enabled", False)
+        self.staged_exit_pcts = config.get("staged_exit_pcts") or [0.5, 0.7, 1.0]
+        self.max_theoretical_profit = None
+        self.staged_exit_stage = 0        # 0..3, how many stages have fired
+        self.staged_lot_plan = {}         # leg -> [stage0_qty, stage1_qty, stage2_qty]
+
+        # Profit Table mode: an alternate, separate profit-booking strategy
+        # that only applies to a plain 2-leg short strangle (Sell CE +
+        # Sell PE, equal lots, no hedge legs). Independent of the staged
+        # exit above -- these two modes are mutually exclusive at the API
+        # layer, never both active for the same session.
+        #
+        # Mechanics (see _run's entry-completion block for the full
+        # derivation): Max Profit = (CE premium + PE premium) x lot_size x
+        # total_lots. Initial SL ("Running TSL") = Max Profit x the 2nd
+        # threshold's percentage. As profit runs, Running TSL trails 1:1
+        # with it (Running TSL = stage's base TSL - profit gained since
+        # that stage started). Each time screen profit organically reaches
+        # a threshold, that stage's lots are booked and the TSL steps down
+        # by the theoretical (not actual-fill) profit for that stage. If
+        # Running TSL is ever touched first, the whole remaining position
+        # exits immediately -- a negative Running TSL means that exit
+        # still locks in profit, not a loss.
+        self.profit_table_enabled = config.get("profit_table_enabled", False)
+        self.profit_table_pcts = config.get("profit_table_pcts") or [0.5, 0.75, 1.0]
+        self.pt_stage1_lots_cfg = config.get("profit_table_stage1_lots")
+        self.pt_stage2_lots_cfg = config.get("profit_table_stage2_lots")
+
+        self.pt_total_lots = None
+        self.pt_entry_prices = {}
+        self.pt_original_qty = None
+        self.pt_max_profit = None
+        self.pt_desired_profit = None
+        self.pt_running_tsl = None
+        self.pt_tsl_base = None
+        self.pt_stage_base_profit = 0.0
+        self.pt_stage = 0
+        self.pt_stage_lots = []
+
         self.leg_info = {}
         self.active_legs = []
         self.realized_pnl = 0.0
@@ -98,18 +130,12 @@ class TradingBot:
         self.entry_prices = {}
         self.current_prices = {}
         self.combined_loss = 0.0
-        self.max_loss = float(config["max_loss"])
-        self.initial_max_loss = float(config["max_loss"])
-        self.dynamic_max_loss = float(config["max_loss"])
-        self.trailing_start_profit = 0.0
-        self.peak_profit = 0.0
+        self.max_loss = config.get("max_loss")
         self.exit_reason = None
         self.total_pnl = 0.0
         self.leg_exit_flags = {}
         self.started_at = None
         self.ended_at = None
-        self.logs = []
-        self.log_date = datetime.now(IST).date()
 
     # ---------------- public control surface ----------------
 
@@ -119,6 +145,19 @@ class TradingBot:
         self.realized_pnl = 0.0
         self.leg_info = {}
         self.active_legs = []
+        self.max_theoretical_profit = None
+        self.staged_exit_stage = 0
+        self.staged_lot_plan = {}
+        self.pt_total_lots = None
+        self.pt_entry_prices = {}
+        self.pt_original_qty = None
+        self.pt_max_profit = None
+        self.pt_desired_profit = None
+        self.pt_running_tsl = None
+        self.pt_tsl_base = None
+        self.pt_stage_base_profit = 0.0
+        self.pt_stage = 0
+        self.pt_stage_lots = []
         self._manual_stop.clear()
         self._stop_only = False
         self._exit_requested = False
@@ -141,13 +180,6 @@ class TradingBot:
         self._manual_stop.set()
 
     def snapshot(self) -> dict:
-        today = datetime.now(IST).date()
-
-        if today != self.log_date:
-            with self._lock:
-                self.logs.clear()
-                self.log_date = today
-
         with self._lock:
             return {
                 "status": self.status,
@@ -163,7 +195,7 @@ class TradingBot:
                 "entry_prices": self.entry_prices,
                 "current_prices": self.current_prices,
                 "combined_loss": round(self.combined_loss, 2),
-                "max_loss": self.dynamic_max_loss,
+                "max_loss": self.max_loss,
                 "exit_reason": self.exit_reason,
                 "total_pnl": round(self.total_pnl, 2),
                 "leg_exit_flags": self.leg_exit_flags,
@@ -172,59 +204,15 @@ class TradingBot:
                 "trailing_stop_enabled": self.trailing_stop_enabled,
                 "trail_amount": self.trail_amount,
                 "target_profit": self.target_profit,
-                "logs": list(self.logs),
+                "staged_exit_enabled": self.staged_exit_enabled,
+                "staged_exit_stage": self.staged_exit_stage,
+                "max_theoretical_profit": round(self.max_theoretical_profit, 2) if self.max_theoretical_profit is not None else None,
+                "profit_table_enabled": self.profit_table_enabled,
+                "pt_stage": self.pt_stage,
+                "pt_max_profit": round(self.pt_max_profit, 2) if self.pt_max_profit is not None else None,
+                "pt_desired_profit": round(self.pt_desired_profit, 2) if self.pt_desired_profit is not None else None,
+                "pt_running_tsl": round(self.pt_running_tsl, 2) if self.pt_running_tsl is not None else None,
             }
-
-    def update_risk(
-        self,
-        max_loss=None,
-        target_profit=None,
-        trailing=None,
-        trail_amount=None
-    ):
-
-        with self._lock:
-
-            if max_loss is not None:
-
-                old_sl = self.max_loss
-                self.initial_max_loss = float(max_loss)
-                self.max_loss = float(max_loss)
-
-                # Reset trailing from the new stop loss
-                self.dynamic_max_loss = float(max_loss)
-                current_profit = max(self.total_pnl, 0)
-                self.peak_profit = current_profit
-                self.trailing_start_profit = current_profit
-
-                self._add_log(
-                    f"Combined SL changed from ₹{old_sl:.0f} to ₹{self.max_loss:.0f}. "
-                    "Trailing reset."
-                )
-
-            if target_profit is not None:
-
-                self.target_profit = float(target_profit)
-
-                self._add_log(
-                    f"Target Profit changed → ₹{self.target_profit:.0f}"
-                )
-
-            if trailing is not None:
-
-                self.trailing_stop_enabled = trailing
-
-                self._add_log(
-                    f"Trailing {'Enabled' if trailing else 'Disabled'}"
-                )
-
-            if trail_amount is not None:
-
-                self.trail_amount = float(trail_amount)
-
-                self._add_log(
-                    f"Trail Amount changed → ₹{self.trail_amount:.0f}"
-                )
 
     def _sync_manual_position_changes(
         self,
@@ -371,17 +359,6 @@ class TradingBot:
             for k, v in kwargs.items():
                 setattr(self, k, v)
 
-    def _add_log(self, message, level="INFO"):
-        self.logs.append({
-            "timestamp": datetime.now(IST).strftime("%H:%M:%S"),
-            "level": level,
-            "message": message
-        })
-
-        # keep last 500 logs
-        if len(self.logs) > 500:
-            self.logs.pop(0)
-
     def _is_market_open(self):
         now = datetime.now(IST)
         if now.weekday() >= 5:
@@ -410,10 +387,7 @@ class TradingBot:
                 market_protection=self.kite.MARKET_PROTECTION_AUTO,
 
             )
-            msg = f"{action} {qty} x {symbol}"
-            self._add_log(msg)
-            print(msg)
-
+            print(f"[ORDER PLACED] {action} {qty} x {symbol} | Order ID: {order_id} | Time: {exec_time}")
             return order_id
         except Exception as e:
             import traceback
@@ -425,9 +399,9 @@ class TradingBot:
             print(error)
             traceback.print_exc()
             print("=" * 80)
-    
+
             self._set(error_message=error)
-            self._add_log(error, "ERROR")
+
             return None
     
     def _get_ltp(self, symbol):
@@ -491,6 +465,175 @@ class TradingBot:
 
         print(f"Failed to exit {symbol}.")
         return False
+
+    def _exit_partial_leg(self, symbol, qty, transaction_type, retries=ORDER_RETRY_COUNT):
+        """
+        Same retry logic as _exit_leg, but returns the average fill price
+        (or False on failure) instead of a bare bool -- staged profit
+        booking needs the fill price to compute realized P&L for the
+        exited chunk.
+        """
+
+        for attempt in range(1, retries + 1):
+
+            print(f"Partial-exiting {qty} x {symbol} (Attempt {attempt}/{retries})")
+
+            order_id = self._place_order(symbol, qty, transaction_type)
+
+            if not order_id:
+                continue
+
+            fill_price = self._wait_for_order_completion(order_id, dry_run_symbol=symbol)
+
+            if fill_price is not False:
+                print(f"{qty} x {symbol} partially exited at {fill_price}.")
+                return fill_price
+
+            print(f"Retrying partial exit of {symbol}...")
+
+        print(f"Failed to partially exit {qty} x {symbol}.")
+        return False
+
+    def _execute_staged_exit(self, active_legs, legs, qtys, entry_prices, exit_txn, leg_exit_flags):
+        """
+        Books 1/3 of each active leg's original lots at the current
+        staged_exit_stage. Mutates qtys/entry_prices in place (reducing
+        remaining qty) and folds realized P&L into self.realized_pnl,
+        same pattern as manual partial closes. Legs that reach 0 qty are
+        dropped from active_legs. Returns the updated active_legs list.
+        """
+        stage = self.staged_exit_stage
+        updated_active_legs = list(active_legs)
+
+        for leg in list(active_legs):
+            plan = self.staged_lot_plan.get(leg)
+            if not plan:
+                continue
+            stage_qty = plan[stage]
+            if stage_qty <= 0:
+                continue  # this leg had too few lots to have anything left at this stage
+            stage_qty = min(stage_qty, qtys.get(leg, 0))
+            if stage_qty <= 0:
+                continue
+
+            symbol = legs[leg]["symbol"]
+            fill_price = self._exit_partial_leg(symbol, stage_qty, exit_txn[leg])
+
+            if fill_price is False:
+                self._add_log(
+                    f"Staged exit stage {stage + 1}: failed to book {stage_qty} x {symbol} -- left open, will retry next tick.",
+                    "ERROR",
+                )
+                continue
+
+            direction = LEG_DIRECTIONS[leg]
+            profit = -leg_loss_per_unit(direction, entry_prices[leg], fill_price) * stage_qty
+            self.realized_pnl += profit
+            qtys[leg] -= stage_qty
+
+            self._add_log(
+                f"Staged exit stage {stage + 1}: booked {stage_qty} x {symbol} @ \u20b9{fill_price:.2f} "
+                f"(P&L \u20b9{profit:.2f})"
+            )
+
+            if qtys[leg] <= 0:
+                qtys.pop(leg, None)
+                entry_prices.pop(leg, None)
+                leg_exit_flags.pop(leg, None)
+                self.leg_info.pop(leg, None)
+                if leg in updated_active_legs:
+                    updated_active_legs.remove(leg)
+
+        self.staged_exit_stage += 1
+        return updated_active_legs
+
+    def _execute_profit_table_stage(self, active_legs, legs, qtys, entry_prices, exit_txn, lots_to_exit):
+        """
+        Books `lots_to_exit` lots from EACH of Sell CE / Sell PE (Profit
+        Table mode is 2-leg-only, so this always operates on exactly
+        those two symbols). Uses the actual fill price for real realized
+        P&L; the Running TSL step-down uses a separate theoretical figure
+        computed by the caller, per the spec.
+        """
+        lot_size = self.config["lot_size"]
+        qty_to_exit = lots_to_exit * lot_size
+        updated_active_legs = list(active_legs)
+
+        if qty_to_exit <= 0:
+            return updated_active_legs
+
+        for leg in ("SELL_CE", "SELL_PE"):
+            if leg not in active_legs:
+                continue
+
+            leg_qty = min(qty_to_exit, qtys.get(leg, 0))
+            if leg_qty <= 0:
+                continue
+
+            symbol = legs[leg]["symbol"]
+            fill_price = self._exit_partial_leg(symbol, leg_qty, exit_txn[leg])
+
+            if fill_price is False:
+                self._add_log(
+                    f"Profit Table: failed to book {leg_qty} x {symbol} -- left open, will retry next tick.",
+                    "ERROR",
+                )
+                continue
+
+            profit = (entry_prices[leg] - fill_price) * leg_qty  # SELL leg
+            self.realized_pnl += profit
+            qtys[leg] -= leg_qty
+
+            self._add_log(
+                f"Profit Table booking: {symbol} closed {lots_to_exit} lot(s) @ \u20b9{fill_price:.2f} "
+                f"(P&L \u20b9{profit:.2f})"
+            )
+
+            if qtys[leg] <= 0:
+                qtys.pop(leg, None)
+                entry_prices.pop(leg, None)
+                self.leg_info.pop(leg, None)
+                if leg in updated_active_legs:
+                    updated_active_legs.remove(leg)
+
+        return updated_active_legs
+
+    def _profit_table_final_verify(self, symbols_by_leg):
+        """
+        Per spec: after Profit Table's final exit, wait an extra minute
+        and recheck Zerodha's positions directly. If anything is still
+        open (a lagged fill, a partial reject that slipped through),
+        square it off immediately rather than leaving it unmonitored --
+        the session has already ended by this point.
+        """
+        if self.dry_run:
+            return
+
+        time.sleep(60)
+
+        try:
+            positions = self.kite.positions()["net"]
+        except Exception as e:
+            self._add_log(f"Profit Table final recheck: could not fetch positions ({e}).", "ERROR")
+            return
+
+        for leg, symbol in symbols_by_leg.items():
+            for p in positions:
+                if p["tradingsymbol"] != symbol or p["exchange"] != self.exchange or p["quantity"] == 0:
+                    continue
+
+                qty_to_close = abs(p["quantity"])
+                # Both legs in Profit Table mode are always SELL (short) --
+                # closing a residual short position always means buying back.
+                success = self._exit_leg(symbol, qty_to_close, self.kite.TRANSACTION_TYPE_BUY, retries=ORDER_RETRY_COUNT)
+
+                if success:
+                    self._add_log(f"Profit Table final recheck: squared off {qty_to_close} x {symbol} still open.")
+                else:
+                    self._add_log(
+                        f"Profit Table final recheck: FAILED to square off {qty_to_close} x {symbol} -- MANUAL ACTION REQUIRED.",
+                        "ERROR",
+                    )
 
 
     def _verify_all_positions_closed(self, symbols=None):
@@ -573,9 +716,7 @@ class TradingBot:
                 cfg["sell_ce_strike"], cfg["sell_pe_strike"],
             )
         except Exception as e:
-            error = str(e)
-            self._set(status="error", error_message=error, ended_at=datetime.now(IST).isoformat())
-            self._add_log(error, "ERROR")
+            self._set(status="error", error_message=str(e), ended_at=datetime.now(IST).isoformat())
             return
 
         lot_size = cfg["lot_size"]
@@ -602,10 +743,8 @@ class TradingBot:
         }
 
         self._set(status="waiting_for_market", legs=legs, exchange=exchange, qtys=qtys)
-        self._add_log("Waiting for market open")
-        while not self._is_market_open():
 
-            self._update_index_ltp()
+        while not self._is_market_open():
 
             if self._manual_stop.is_set():
 
@@ -614,8 +753,7 @@ class TradingBot:
                         status="stopped",
                         exit_reason="ALGORITHM STOPPED (before entry)",
                         ended_at=datetime.now(IST).isoformat()
-                    )
-
+                )
                 elif self._exit_requested:
                     self._set(
                         status="exited",
@@ -624,12 +762,10 @@ class TradingBot:
                     )
 
                 return
-
-            time.sleep(5)
+            time.sleep(30)
 
         # ---------------- Entry: all 4 legs ----------------
         self._set(status="entering")
-        self._add_log("Entering positions")
         entry_prices = {}
         entered_legs = []
         for leg in active_legs:
@@ -668,19 +804,11 @@ class TradingBot:
                         ),
                         ended_at=datetime.now(IST).isoformat()
                     )
-                    self._add_log(
-                        f"Failed to enter {leg}. Rollback failed for: {rollback_failed}",
-                        "ERROR"
-                    )
                 else:
                     self._set(
                     status="error",
                     error_message=f"{leg} failed: {self.error_message}",
                     ended_at=datetime.now(IST).isoformat()
-                    )
-                    self._add_log(
-                        f"{leg} failed: {self.error_message}",
-                        "ERROR"
                     )
                 return
 
@@ -690,7 +818,6 @@ class TradingBot:
 
                 print("\nENTRY INCOMPLETE")
                 print("Rolling back previously entered positions...")
-                
 
                 rollback_failed = []
 
@@ -716,11 +843,7 @@ class TradingBot:
                         ),
                     ended_at=datetime.now(IST).isoformat()
                     )
-                    self._add_log(
-                        f"{leg} entry failed and rollback was incomplete. "
-                        f"Open positions may remain: {rollback_failed}",
-                        "ERROR"
-                    )
+
                 else:
 
                     self._set(
@@ -728,10 +851,7 @@ class TradingBot:
                     error_message=f"{leg} failed: {self.error_message}",
                     ended_at=datetime.now(IST).isoformat()
                 )
-                    self._add_log(
-                        f"{leg} failed: {self.error_message}",
-                        "ERROR"
-                    )
+
                 return
 
             entered_legs.append(leg)
@@ -745,6 +865,76 @@ class TradingBot:
                 "realized": False,
                 "realized_pnl": 0.0,
             }
+
+        if self.staged_exit_enabled:
+            # Net credit collected at entry (SELL premiums received minus
+            # BUY premiums paid) -- the only fixed reference available
+            # right after entry, used as the "max profit" denominator for
+            # the 3 staged thresholds.
+            self.max_theoretical_profit = sum(
+                (entry_prices[leg] if LEG_DIRECTIONS[leg] == "SELL" else -entry_prices[leg]) * qtys[leg]
+                for leg in active_legs
+            )
+            self._add_log(
+                f"Staged profit booking armed. Net credit at entry: \u20b9{self.max_theoretical_profit:.2f} "
+                f"(stages at {int(self.staged_exit_pcts[0]*100)}% / "
+                f"{int(self.staged_exit_pcts[1]*100)}% / "
+                f"{int(self.staged_exit_pcts[2]*100)}%)"
+            )
+            for leg in active_legs:
+                leg_lots = qtys[leg] // lot_size
+                stage1_lots = leg_lots // 3
+                stage2_lots = leg_lots // 3
+                stage3_lots = leg_lots - stage1_lots - stage2_lots
+                self.staged_lot_plan[leg] = [
+                    stage1_lots * lot_size,
+                    stage2_lots * lot_size,
+                    stage3_lots * lot_size,
+                ]
+
+        if self.profit_table_enabled:
+            if set(active_legs) != {"SELL_CE", "SELL_PE"}:
+                error = "Profit Table mode requires exactly Sell CE + Sell PE (no other legs)."
+                self._set(status="error", error_message=error, ended_at=datetime.now(IST).isoformat())
+                self._add_log(error, "ERROR")
+                return
+            if qtys["SELL_CE"] != qtys["SELL_PE"]:
+                error = "Profit Table mode requires equal lots on Sell CE and Sell PE."
+                self._set(status="error", error_message=error, ended_at=datetime.now(IST).isoformat())
+                self._add_log(error, "ERROR")
+                return
+
+            pt_total_lots = qtys["SELL_CE"] // lot_size
+            self.pt_total_lots = pt_total_lots
+            self.pt_entry_prices = dict(entry_prices)
+            self.pt_original_qty = qtys["SELL_CE"]
+
+            # Max profit for a plain short strangle: both legs expiring
+            # worthless, i.e. the full combined premium collected.
+            self.pt_max_profit = (entry_prices["SELL_CE"] + entry_prices["SELL_PE"]) * self.pt_original_qty
+            # Initial SL = Max Profit x the 2nd threshold's percentage --
+            # matches the spec exactly (e.g. 75% in the worked example).
+            self.pt_desired_profit = self.pt_max_profit * self.profit_table_pcts[1]
+            self.pt_running_tsl = self.pt_desired_profit
+            self.pt_tsl_base = self.pt_desired_profit
+            self.pt_stage_base_profit = 0.0
+            self.pt_stage = 0
+
+            s1 = self.pt_stage1_lots_cfg if self.pt_stage1_lots_cfg else pt_total_lots // 3
+            s2 = self.pt_stage2_lots_cfg if self.pt_stage2_lots_cfg else pt_total_lots // 3
+            s1 = min(s1, pt_total_lots)
+            s2 = min(s2, pt_total_lots - s1)
+            s3 = pt_total_lots - s1 - s2
+            self.pt_stage_lots = [s1, s2, s3]
+
+            self._add_log(
+                f"Profit Table armed. Max profit \u20b9{self.pt_max_profit:.0f}, "
+                f"Initial SL \u20b9{self.pt_desired_profit:.0f} "
+                f"(= Max Profit \u00d7 {int(self.profit_table_pcts[1]*100)}%). "
+                f"Stages {int(self.profit_table_pcts[0]*100)}%/{int(self.profit_table_pcts[1]*100)}%/"
+                f"{int(self.profit_table_pcts[2]*100)}% \u2192 lots {s1}/{s2}/{s3} of {pt_total_lots} total."
+            )
+
         leg_exit_flags = {}
         self._set(
             status="monitoring",
@@ -758,7 +948,8 @@ class TradingBot:
         # ---------------- Monitor ----------------
         last_known_prices = dict(entry_prices)
 
-        self.dynamic_max_loss = self.max_loss
+        peak_profit = 0.0
+        dynamic_max_loss = cfg["max_loss"]
 
         while True:
             exit_reason = None
@@ -772,9 +963,7 @@ class TradingBot:
                         exit_reason="ALGORITHM STOPPED",
                         ended_at=datetime.now(IST).isoformat()
                     )
-                    self._add_log(
-                        "Algorithm stopped. Positions remain open."
-                    )
+
                     print("Algorithm stopped. Positions remain open.")
                     return
 
@@ -815,7 +1004,6 @@ class TradingBot:
                             ended_at=datetime.now(IST).isoformat()
                         )
                         print("All positions were manually closed.")
-                        self._add_log("All positions were manually closed.")
 
                         return
 
@@ -831,9 +1019,6 @@ class TradingBot:
 
                     symbols.append(index_symbol)
                     ltp_data = self.kite.ltp(symbols)
-                    print("Requested symbols:", symbols)
-                    print("Returned keys:", list(ltp_data.keys()))
-                    print("Index LTP:", ltp_data.get(index_symbol))
                     self.index_ltp = ltp_data[index_symbol]["last_price"]
                     current_prices = {}
 
@@ -845,40 +1030,143 @@ class TradingBot:
 
                     last_known_prices = current_prices
                 except Exception as e:
-                    error = f"Price fetch error: {e}"
-                    self._set(error_message=error)
-                    self._add_log(error, "ERROR")
+                    self._set(error_message=f"Price fetch error: {e}")
                     time.sleep(10)
                     continue
 
                 combined_loss = compute_combined_loss(entry_prices, current_prices, qtys)
                 total_pnl = -combined_loss + self.realized_pnl
+
+                if (self.staged_exit_enabled and active_legs
+                        and self.max_theoretical_profit is not None
+                        and self.max_theoretical_profit > 0
+                        and self.staged_exit_stage < 3):
+                    stage_threshold = self.max_theoretical_profit * self.staged_exit_pcts[self.staged_exit_stage]
+                    if total_pnl >= stage_threshold:
+                        stage_num = self.staged_exit_stage + 1
+                        print(f"\n===== STAGED EXIT: stage {stage_num} threshold hit (\u20b9{stage_threshold:.2f}) =====")
+                        active_legs = self._execute_staged_exit(
+                            active_legs, legs, qtys, entry_prices, exit_txn, leg_exit_flags
+                        )
+                        self.active_legs = active_legs.copy()
+                        current_prices = {leg: current_prices[leg] for leg in active_legs if leg in current_prices}
+                        if active_legs:
+                            combined_loss = compute_combined_loss(entry_prices, current_prices, qtys)
+                            total_pnl = -combined_loss + self.realized_pnl
+                        else:
+                            combined_loss = 0.0
+                            total_pnl = self.realized_pnl
+                            self._set(
+                                status="exited",
+                                exit_reason="STAGED EXIT COMPLETE",
+                                total_pnl=total_pnl,
+                                combined_loss=combined_loss,
+                                ended_at=datetime.now(IST).isoformat()
+                            )
+                            self._add_log(f"All legs exited via staged profit booking. Final P&L \u20b9{total_pnl:.2f}")
+                            print("All legs exited via staged profit booking.")
+                            self.active_legs = []
+                            return
+
+                if (self.profit_table_enabled and active_legs
+                        and self.pt_max_profit is not None
+                        and self.pt_max_profit > 0
+                        and self.pt_stage < 3):
+
+                    screen_profit = sum(
+                        (self.pt_entry_prices[leg] - current_prices[leg]) * self.pt_original_qty
+                        for leg in ("SELL_CE", "SELL_PE")
+                        if leg in current_prices
+                    )
+
+                    delta_since_stage_start = screen_profit - self.pt_stage_base_profit
+                    self.pt_running_tsl = self.pt_tsl_base - delta_since_stage_start
+
+                    stage_target = self.pt_max_profit * self.profit_table_pcts[self.pt_stage]
+                    tsl_hit = combined_loss >= self.pt_running_tsl
+                    target_hit = screen_profit >= stage_target
+
+                    if tsl_hit:
+                        lock_desc = (
+                            f"locks in \u20b9{-self.pt_running_tsl:.0f} profit"
+                            if self.pt_running_tsl < 0
+                            else f"caps loss at \u20b9{self.pt_running_tsl:.0f}"
+                        )
+                        exit_reason = f"PROFIT TABLE TSL HIT ({lock_desc})"
+
+                    elif target_hit and self.pt_stage == 2:
+                        exit_reason = "PROFIT TABLE EXIT 3/3 (100% of max profit)"
+
+                    elif target_hit:
+                        stage_num = self.pt_stage + 1
+                        lots_this_stage = self.pt_stage_lots[self.pt_stage]
+
+                        if lots_this_stage > 0:
+                            print(f"\n===== PROFIT TABLE: stage {stage_num} target hit (\u20b9{stage_target:.2f}) =====")
+                            active_legs = self._execute_profit_table_stage(
+                                active_legs, legs, qtys, entry_prices, exit_txn, lots_this_stage
+                            )
+                            self.active_legs = active_legs.copy()
+                            current_prices = {leg: current_prices[leg] for leg in active_legs if leg in current_prices}
+
+                        theoretical_partial = (
+                            stage_target * (lots_this_stage / self.pt_total_lots) if self.pt_total_lots else 0
+                        )
+                        self.pt_tsl_base = self.pt_running_tsl - theoretical_partial
+                        self.pt_stage_base_profit = screen_profit
+                        self.pt_stage += 1
+
+                        self._add_log(
+                            f"Profit Table stage {stage_num}/3 booked ({lots_this_stage} lot(s) @ "
+                            f"{int(self.profit_table_pcts[stage_num-1]*100)}% of max profit). "
+                            f"Running TSL now \u20b9{self.pt_tsl_base:.0f}."
+                        )
+
+                        if not active_legs:
+                            total_pnl = self.realized_pnl
+                            self._set(
+                                status="exited",
+                                exit_reason=f"PROFIT TABLE COMPLETE ({stage_num}/3)",
+                                total_pnl=total_pnl,
+                                combined_loss=0.0,
+                                ended_at=datetime.now(IST).isoformat()
+                            )
+                            self._add_log(f"All legs exited via Profit Table booking. Final P&L \u20b9{total_pnl:.2f}")
+                            print("All legs exited via Profit Table booking.")
+                            self.active_legs = []
+                            self._profit_table_final_verify({
+                                leg: legs[leg]["symbol"] for leg in ("SELL_CE", "SELL_PE") if leg in legs
+                            })
+                            return
+
+                        combined_loss = compute_combined_loss(entry_prices, current_prices, qtys)
+                        total_pnl = -combined_loss + self.realized_pnl
+
                 if (
-                    self.target_profit is not None
+                    not self.profit_table_enabled
+                    and self.target_profit is not None
                     and total_pnl >= self.target_profit
                 ):
                     exit_reason = "TARGET PROFIT HIT"
                 current_profit = max(total_pnl, 0)
                 if self.trailing_stop_enabled:
 
-                    if current_profit > self.peak_profit:
+                    if current_profit > peak_profit:
 
-                        self.peak_profit = current_profit
-                        profit_since_reset = self.peak_profit - self.trailing_start_profit
-                        steps = int(profit_since_reset // 100)
+                        peak_profit = current_profit
+
+                        steps = int(peak_profit // 100)
 
                         new_dynamic = max(
                             0,
-                            self.initial_max_loss - (steps * self.trail_amount)
+                            cfg["max_loss"] - (steps * self.trail_amount)
                         )
 
-                        if new_dynamic != self.dynamic_max_loss:
-                            self.dynamic_max_loss = new_dynamic
-                            self._add_log(
-                                f"Trailing SL Updated → ₹{self.dynamic_max_loss:.0f}"
-                            )
+                        if new_dynamic != dynamic_max_loss:
+                            dynamic_max_loss = new_dynamic
+
                             print(
-                                f"Trailing SL Updated: ₹{self.dynamic_max_loss:.0f}"
+                                f"Trailing SL Updated: ₹{dynamic_max_loss}"
                             )
                 # Optional, opt-in per-leg checks. With no per_leg_stop_loss /
                 # per_leg_target configured these never fire, so the original
@@ -896,6 +1184,7 @@ class TradingBot:
                 self._set(current_prices=current_prices,
                            combined_loss=combined_loss,
                            total_pnl=total_pnl,
+                           max_loss=dynamic_max_loss,
                             leg_exit_flags=dict(leg_exit_flags),
                             error_message=None,)
 
@@ -904,7 +1193,7 @@ class TradingBot:
 
                     if should_exit(
                         combined_loss,
-                        self.dynamic_max_loss
+                        dynamic_max_loss
                     ):
                         exit_reason = "MAX LOSS HIT"
 
@@ -916,10 +1205,7 @@ class TradingBot:
             if exit_reason:
                 failed_legs = []
                 exit_symbols = []
-                self._add_log(
-                    f"EXIT : {exit_reason}",
-                    "EXIT"
-                )
+
                 print(f"\n===== EXIT : {exit_reason} =====")
 
                 for leg in active_legs:
@@ -957,7 +1243,6 @@ class TradingBot:
                     print("MANUAL ACTION REQUIRED")
                     print(message)
                     print("***************\n")
-                    self._add_log(message, "ERROR")
                     self.active_legs = []
                     return
 
@@ -1010,9 +1295,12 @@ class TradingBot:
                     ended_at=datetime.now(IST).isoformat()
                 )
 
-                self._add_log("All positions exited successfully.")
                 print("All positions exited successfully.")
                 self.active_legs = []
+                if self.profit_table_enabled:
+                    self._profit_table_final_verify({
+                        leg: legs[leg]["symbol"] for leg in ("SELL_CE", "SELL_PE") if leg in legs
+                    })
                 return
             
             if self._manual_stop.wait(timeout=2):

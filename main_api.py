@@ -24,12 +24,13 @@ Run locally:
     uvicorn main_api:app --reload
 """
 import os
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from kiteconnect import KiteConnect
+from kiteconnect.exceptions import TokenException
 from pydantic import BaseModel, Field
 
 from bot_engine import TradingBot, env_dry_run
@@ -62,6 +63,29 @@ def _get_authed_kite() -> KiteConnect:
     kite = KiteConnect(api_key=API_KEY)
     kite.set_access_token(_access_token)
     return kite
+
+
+def _clear_session():
+    """Drops a stale/expired token from memory so subsequent auth checks
+    correctly report logged-out instead of hanging onto a dead token."""
+    global _access_token, _user_name
+    _access_token = None
+    _user_name = None
+
+
+def _is_token_error(e: Exception) -> bool:
+    """True if this looks like an expired/invalid Kite session.
+
+    Catching kiteconnect.exceptions.TokenException alone isn't reliable --
+    depending on the installed SDK version and exactly which call fails,
+    Zerodha's own "Incorrect `api_key` or `access_token`" error doesn't
+    always surface as that exception class even though its error_type
+    field says TokenException. Checking the message text too catches it
+    either way."""
+    if isinstance(e, TokenException):
+        return True
+    msg = str(e)
+    return "access_token" in msg or "TokenException" in msg
 
 
 @app.get("/")
@@ -101,6 +125,9 @@ def quote(index: str, expiry: str, strike: int, option_type: str):
     try:
         legs, exchange = resolve_multi_leg_symbols(kite, index, expiry, **kwargs)
     except Exception as e:
+        if _is_token_error(e):
+            _clear_session()
+            raise HTTPException(401, "Your Zerodha session has expired -- please log out and log in again.")
         raise HTTPException(400, str(e))
 
     symbol = legs[leg_key]["symbol"]
@@ -110,6 +137,9 @@ def quote(index: str, expiry: str, strike: int, option_type: str):
         ltp_data = kite.ltp(key)
         ltp = ltp_data[key]["last_price"]
     except Exception as e:
+        if _is_token_error(e):
+            _clear_session()
+            raise HTTPException(401, "Your Zerodha session has expired -- please log out and log in again.")
         raise HTTPException(502, f"Could not fetch LTP: {e}")
 
     return {"symbol": symbol, "ltp": ltp}
@@ -155,7 +185,25 @@ def zerodha_callback(request_token: str, status: Optional[str] = None,
 def auth_status():
     if not _access_token:
         return {"logged_in": False}
-    return {"logged_in": True, "user_name": _user_name}
+
+    # A token surviving in memory doesn't mean it's still valid -- Kite
+    # tokens expire daily, and this process can stay up across days (e.g.
+    # on Render). Without an active check here, a stale token would let
+    # the user reach the setup screen and only fail later on a real Kite
+    # call with a confusing "Incorrect api_key or access_token" error.
+    kite = KiteConnect(api_key=API_KEY)
+    kite.set_access_token(_access_token)
+    try:
+        profile = kite.profile()
+    except Exception as e:
+        if _is_token_error(e):
+            _clear_session()
+            return {"logged_in": False}
+        # Some other transient issue (network, Kite outage) -- don't log
+        # the user out for something that isn't actually a bad token.
+        return {"logged_in": True, "user_name": _user_name}
+
+    return {"logged_in": True, "user_name": profile.get("user_name", _user_name)}
 
 
 @app.post("/api/logout")
@@ -175,6 +223,18 @@ class StartRequest(BaseModel):
     trailing_stop_enabled: bool = False
     trail_amount: float = Field(default=50, gt=0)
     target_profit: Optional[float] = None
+
+    # Staged partial profit booking: exit 1/3 of each leg's lots at each
+    # of 3 thresholds (fraction of net credit at entry). Off by default.
+    staged_exit_enabled: bool = False
+    staged_exit_pcts: Optional[List[float]] = None  # e.g. [0.5, 0.7, 1.0]
+
+    # Profit Table mode: alternate strategy, Sell CE + Sell PE only (see
+    # bot_engine.py's TradingBot docstring for the full mechanics).
+    profit_table_enabled: bool = False
+    profit_table_pcts: Optional[List[float]] = None  # e.g. [0.5, 0.75, 1.0]
+    profit_table_stage1_lots: Optional[int] = None
+    profit_table_stage2_lots: Optional[int] = None
 
     buy_ce_strike: Optional[int] = None
     buy_pe_strike: Optional[int] = None
@@ -228,6 +288,41 @@ def _validate_legs(req: StartRequest):
     return active
 
 
+def _validate_pcts(pcts, field_name):
+    if pcts is None:
+        return
+    if len(pcts) != 3:
+        raise HTTPException(400, f"{field_name} must have exactly 3 values.")
+    if not (0 < pcts[0] < pcts[1] < pcts[2] <= 1.0001):
+        raise HTTPException(
+            400,
+            f"{field_name} must be strictly increasing, each between 0 and 1 (e.g. [0.5, 0.75, 1.0])."
+        )
+
+
+def _validate_advanced_exit_modes(req: StartRequest, active_legs):
+    if req.staged_exit_enabled and req.profit_table_enabled:
+        raise HTTPException(400, "Staged Exit and Profit Table mode can't both be enabled -- pick one.")
+
+    _validate_pcts(req.staged_exit_pcts, "staged_exit_pcts")
+    _validate_pcts(req.profit_table_pcts, "profit_table_pcts")
+
+    if req.profit_table_enabled:
+        if set(active_legs) != {"SELL_CE", "SELL_PE"}:
+            raise HTTPException(
+                400,
+                "Profit Table mode requires exactly Sell CE + Sell PE -- no Buy legs, no single-leg positions."
+            )
+        if req.sell_ce_lots != req.sell_pe_lots:
+            raise HTTPException(400, "Profit Table mode requires equal lots on Sell CE and Sell PE.")
+        for name, val in (("profit_table_stage1_lots", req.profit_table_stage1_lots),
+                          ("profit_table_stage2_lots", req.profit_table_stage2_lots)):
+            if val is not None and val < 0:
+                raise HTTPException(400, f"{name} can't be negative.")
+            if val is not None and val >= req.sell_ce_lots:
+                raise HTTPException(400, f"{name} must leave lots remaining for later stages.")
+
+
 @app.post("/api/start")
 def start(req: StartRequest):
     global _bot
@@ -235,11 +330,21 @@ def start(req: StartRequest):
     if _bot is not None and _bot.status in _RUNNING_STATES:
         raise HTTPException(400, "A session is already running. Stop it before starting a new one.")
 
-    _validate_legs(req)
+    active_legs = _validate_legs(req)
+    _validate_advanced_exit_modes(req, active_legs)
     if req.target_profit is not None and req.target_profit <= 0:
         raise HTTPException(400, "target_profit must be positive when set.")
 
     kite = _get_authed_kite()
+    try:
+        kite.profile()
+    except Exception as e:
+        if _is_token_error(e):
+            _clear_session()
+            raise HTTPException(401, "Your Zerodha session has expired -- please log out and log in again.")
+        # Some other transient issue (network, Kite outage) -- don't block
+        # starting for something that isn't actually a bad token.
+
     lot_size = 20 if req.index == "SENSEX" else 65
     config = {
         "index": req.index,
@@ -261,6 +366,12 @@ def start(req: StartRequest):
         "trailing_stop_enabled": req.trailing_stop_enabled,
         "trail_amount": req.trail_amount,
         "target_profit": req.target_profit,
+        "staged_exit_enabled": req.staged_exit_enabled,
+        "staged_exit_pcts": req.staged_exit_pcts,
+        "profit_table_enabled": req.profit_table_enabled,
+        "profit_table_pcts": req.profit_table_pcts,
+        "profit_table_stage1_lots": req.profit_table_stage1_lots,
+        "profit_table_stage2_lots": req.profit_table_stage2_lots,
     }
 
     _bot = TradingBot(kite, config)
