@@ -55,6 +55,11 @@ _user_name: Optional[str] = None
 _bot: Optional[TradingBot] = None
 _RUNNING_STATES = {"resolving", "waiting_for_market", "entering", "monitoring"}
 
+# Cache option symbols resolved from the instrument dump. The setup screen
+# refreshes LTPs frequently, so we must NOT call kite.instruments() on every
+# refresh. Symbols are stable for a given index/expiry/strike/type.
+_premium_symbol_cache = {}
+
 
 def _get_authed_kite() -> KiteConnect:
     if not _access_token:
@@ -113,6 +118,96 @@ def quote(index: str, expiry: str, strike: int, option_type: str):
         raise HTTPException(502, f"Could not fetch LTP: {e}")
 
     return {"symbol": symbol, "ltp": ltp}
+
+
+@app.get("/api/quotes")
+def quotes(
+    index: str,
+    expiry: str,
+    buy_ce_strike: Optional[int] = None,
+    buy_pe_strike: Optional[int] = None,
+    sell_ce_strike: Optional[int] = None,
+    sell_pe_strike: Optional[int] = None,
+):
+    """
+    Fetch live LTPs for all entered setup-screen strikes in ONE Zerodha
+    request. This endpoint is intentionally separate from /api/quote so the
+    older single-quote endpoint remains available for compatibility.
+
+    The dashboard calls this endpoint roughly every 2 seconds. Contract
+    symbols are resolved once and cached; subsequent refreshes only call
+    kite.ltp() with the already-resolved symbols.
+    """
+    if index not in ("SENSEX", "NIFTY"):
+        raise HTTPException(400, "index must be SENSEX or NIFTY")
+
+    requested = {
+        "BUY_CE": buy_ce_strike,
+        "BUY_PE": buy_pe_strike,
+        "SELL_CE": sell_ce_strike,
+        "SELL_PE": sell_pe_strike,
+    }
+    requested = {leg: strike for leg, strike in requested.items() if strike is not None}
+
+    if not requested:
+        return {"quotes": {}}
+
+    kite = _get_authed_kite()
+
+    # Resolve only symbols we have not already cached.
+    missing = {
+        leg: strike
+        for leg, strike in requested.items()
+        if (index, expiry, strike, leg.split("_")[1]) not in _premium_symbol_cache
+    }
+
+    if missing:
+        kwargs = {
+            "buy_ce_strike": missing.get("BUY_CE"),
+            "buy_pe_strike": missing.get("BUY_PE"),
+            "sell_ce_strike": missing.get("SELL_CE"),
+            "sell_pe_strike": missing.get("SELL_PE"),
+        }
+        try:
+            legs, exchange = resolve_multi_leg_symbols(kite, index, expiry, **kwargs)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+        for leg, info in legs.items():
+            strike = requested.get(leg)
+            if strike is not None:
+                option_type = "CE" if leg.endswith("_CE") else "PE"
+                _premium_symbol_cache[(index, expiry, strike, option_type)] = (
+                    exchange, info["symbol"]
+                )
+
+    # Build one LTP request for every unique contract.
+    keys_by_leg = {}
+    keys = []
+    for leg, strike in requested.items():
+        option_type = "CE" if leg.endswith("_CE") else "PE"
+        cached = _premium_symbol_cache.get((index, expiry, strike, option_type))
+        if not cached:
+            raise HTTPException(400, f"Could not resolve {index} {strike} {option_type}")
+        exchange, symbol = cached
+        key = f"{exchange}:{symbol}"
+        keys_by_leg[leg] = (key, symbol)
+        if key not in keys:
+            keys.append(key)
+
+    try:
+        ltp_data = kite.ltp(keys)
+    except Exception as e:
+        raise HTTPException(502, f"Could not fetch LTPs: {e}")
+
+    result = {}
+    for leg, (key, symbol) in keys_by_leg.items():
+        result[leg] = {
+            "symbol": symbol,
+            "ltp": ltp_data[key]["last_price"],
+        }
+
+    return {"quotes": result}
 
 
 # ---------------- Zerodha login ----------------
