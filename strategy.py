@@ -53,16 +53,24 @@ def compute_combined_loss(entry_prices, current_prices, qtys, leg_directions=LEG
 
 
 def should_exit(combined_loss, max_loss):
-    """Exit as soon as combined_loss reaches or exceeds the max_loss threshold.
-
-    Args:
-        combined_loss: Current combined loss value
-        max_loss: Loss threshold to trigger exit
-
-    Returns:
-        True if combined_loss >= max_loss
     """
-    return combined_loss >= max_loss
+    Check whether the combined loss has reached the current TSL.
+
+    For a positive TSL:
+        TSL = +₹400
+        Exit when combined_loss >= ₹400
+        → Trade exits at ₹400 loss.
+
+    For a negative TSL:
+        TSL = -₹400
+        Exit when combined_loss <= -₹400
+        → Trade exits at ₹400 profit.
+    """
+
+    if max_loss >= 0:
+        return combined_loss >= max_loss
+
+    return combined_loss <= max_loss
 
 
 # ---------------- Optional per-leg SL / target ----------------
