@@ -1169,7 +1169,10 @@ class TradingBot:
                     if self.trailing_stop_enabled and current_profit > peak_profit:
                         peak_profit = current_profit
                         steps = int(peak_profit // 100)
-                        new_dynamic = self.max_loss - (steps * self.trail_amount)
+                        new_dynamic = max(
+                            0,
+                            self.initial_max_loss - (steps * self.trail_amount)
+                        )
                         if new_dynamic != self.dynamic_max_loss:
                             self.dynamic_max_loss = new_dynamic
                             self._add_log(
