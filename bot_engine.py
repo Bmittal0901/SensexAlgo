@@ -32,12 +32,6 @@ ORDER_STATUS_TIMEOUT = 5
 POSITION_VERIFY_RETRIES = 4  # Zerodha's aggregate positions feed can lag
 POSITION_VERIFY_DELAY = 3    # a few seconds behind the order book after a burst of fills
 
-# Profit-booking strategy requested by the user:
-#   Exit 1 -> 50% of calculated maximum profit
-#   Exit 2 -> 70% of calculated maximum profit
-#   Exit 3 -> 100% of calculated maximum profit
-PROFIT_EXIT_THRESHOLDS = (0.50, 0.75, 1.00)
-
 def env_dry_run() -> bool:
     """DRY_RUN is now an env var (e.g. Heroku config var / .env entry)
     instead of a hardcoded constant, so live trading is a deploy-time
@@ -73,23 +67,12 @@ class TradingBot:
           square_off_time                                (optional, "HH:MM" IST, default "15:20")
           dry_run                                         (optional, defaults to env_dry_run())
         """
-        self.exit_strategy_mode = config.get("exit_strategy_mode", "classic")
-        self.trailing_stop_enabled = config.get("trailing_stop_enabled", False)
-        self.trail_amount = config.get("trail_amount", 50)
+        self.trailing_stop_enabled = config.get("trailing_stop_enabled",False)
+        self.trail_amount = config.get("trail_amount",50)
         self.target_profit = config.get("target_profit")
-        self.desired_profit_pct = float(config.get("desired_profit_pct", 75.0))
-        self.profit_exit_thresholds = tuple(config.get("profit_exit_thresholds", PROFIT_EXIT_THRESHOLDS))
-        self.max_profit_total = 0.0
-        self.max_profit_per_lot = 0.0
-        self.profit_exit_stage = 0
-        self.profit_exit_plan = []
-        self.realized_pnl = 0.0
-        self.initial_sl = None
-        self.dynamic_max_loss = None
-        self.staged_base_sl = None
-        self.staged_profit_reference = 0.0
         self.leg_info = {}
         self.active_legs = []
+        self.realized_pnl = 0.0
         self.kite = kite
         self.config = config
         self.index_ltp = None
@@ -115,7 +98,11 @@ class TradingBot:
         self.entry_prices = {}
         self.current_prices = {}
         self.combined_loss = 0.0
-        self.max_loss = config.get("max_loss")
+        self.max_loss = float(config["max_loss"])
+        self.initial_max_loss = float(config["max_loss"])
+        self.dynamic_max_loss = float(config["max_loss"])
+        self.trailing_start_profit = 0.0
+        self.peak_profit = 0.0
         self.exit_reason = None
         self.total_pnl = 0.0
         self.leg_exit_flags = {}
@@ -176,25 +163,15 @@ class TradingBot:
                 "entry_prices": self.entry_prices,
                 "current_prices": self.current_prices,
                 "combined_loss": round(self.combined_loss, 2),
-                "max_loss": self.max_loss,
+                "max_loss": self.dynamic_max_loss,
                 "exit_reason": self.exit_reason,
                 "total_pnl": round(self.total_pnl, 2),
                 "leg_exit_flags": self.leg_exit_flags,
                 "started_at": self.started_at,
                 "ended_at": self.ended_at,
-                "exit_strategy_mode": self.exit_strategy_mode,
                 "trailing_stop_enabled": self.trailing_stop_enabled,
                 "trail_amount": self.trail_amount,
                 "target_profit": self.target_profit,
-                "desired_profit_pct": self.desired_profit_pct,
-                "initial_sl": None if self.initial_sl is None else round(self.initial_sl, 2),
-                "running_sl": None if self.dynamic_max_loss is None else round(self.dynamic_max_loss, 2),
-                "max_profit_total": round(self.max_profit_total, 2),
-                "max_profit_per_lot": round(self.max_profit_per_lot, 2),
-                "profit_exit_stage": self.profit_exit_stage,
-                "profit_exit_thresholds": [round(x * 100, 2) for x in self.profit_exit_thresholds],
-                "profit_exit_plan": list(self.profit_exit_plan),
-                "realized_pnl": round(self.realized_pnl, 2),
                 "logs": list(self.logs),
             }
 
@@ -211,11 +188,14 @@ class TradingBot:
             if max_loss is not None:
 
                 old_sl = self.max_loss
-
+                self.initial_max_loss = float(max_loss)
                 self.max_loss = float(max_loss)
 
                 # Reset trailing from the new stop loss
                 self.dynamic_max_loss = float(max_loss)
+                current_profit = max(self.total_pnl, 0)
+                self.peak_profit = current_profit
+                self.trailing_start_profit = current_profit
 
                 self._add_log(
                     f"Combined SL changed from ₹{old_sl:.0f} to ₹{self.max_loss:.0f}. "
@@ -489,24 +469,6 @@ class TradingBot:
         return False
 
 
-    def _exit_leg_partial(self, symbol, qty, transaction_type, retries=ORDER_RETRY_COUNT):
-        """Place a partial exit and return its actual fill price."""
-        for attempt in range(1, retries + 1):
-            print(f"Exiting {symbol} Qty={qty} (Attempt {attempt}/{retries})")
-            order_id = self._place_order(symbol, qty, transaction_type)
-            if not order_id:
-                continue
-
-            fill_price = self._wait_for_order_completion(
-                order_id, dry_run_symbol=symbol
-            )
-            if fill_price is not False:
-                return float(fill_price)
-
-        print(f"Failed partial exit for {symbol} Qty={qty}.")
-        return False
-
-
     def _exit_leg(self, symbol, qty, transaction_type,retries=ORDER_RETRY_COUNT):
         """
         Exit one leg with retry logic.
@@ -586,210 +548,6 @@ class TradingBot:
         except Exception as e:
             print(f"Unable to verify positions: {e}")
             return False
-
-    def _calculate_pdf_max_profit(self, legs, entry_prices, qtys, lot_size):
-        """Exact maximum-profit calculation from the supplied PDF.
-
-        PDF mode is a SELL CE + SELL PE strategy with equal lots:
-        (CE premium + PE premium) * lot size * total lots.
-        """
-        required = {"SELL_CE", "SELL_PE"}
-        if set(legs) != required:
-            raise ValueError(
-                "PDF staged mode requires exactly SELL CE and SELL PE legs; "
-                "BUY legs are not part of the PDF calculation."
-            )
-        ce_lots = int(round(qtys["SELL_CE"] / lot_size))
-        pe_lots = int(round(qtys["SELL_PE"] / lot_size))
-        if ce_lots <= 0 or pe_lots <= 0 or ce_lots != pe_lots:
-            raise ValueError(
-                "PDF staged mode requires equal positive SELL CE and SELL PE lot counts."
-            )
-        total_lots = ce_lots
-        ce_premium = float(entry_prices["SELL_CE"])
-        pe_premium = float(entry_prices["SELL_PE"])
-        max_profit = (ce_premium + pe_premium) * float(lot_size) * total_lots
-        return max_profit, max_profit / total_lots
-
-    def _force_square_off_open_positions(self, symbols):
-        """Immediately close any still-open session positions by current net quantity."""
-        if self.dry_run:
-            return True
-        symbol_set = set(symbols or [])
-        try:
-            positions = self.kite.positions()["net"]
-            for p in positions:
-                if p.get("tradingsymbol") not in symbol_set:
-                    continue
-                qty = int(p.get("quantity", 0))
-                if qty == 0:
-                    continue
-                txn = self.kite.TRANSACTION_TYPE_SELL if qty > 0 else self.kite.TRANSACTION_TYPE_BUY
-                self._add_log(
-                    f"Emergency square-off: {p['tradingsymbol']} Qty {abs(qty)}",
-                    "EXIT"
-                )
-                self._exit_leg(
-                    p["tradingsymbol"], abs(qty), txn, retries=ORDER_RETRY_COUNT
-                )
-            return True
-        except Exception as e:
-            self._add_log(f"Emergency square-off failed: {e}", "ERROR")
-            return False
-
-    def _calculate_max_profit(self, legs, entry_prices, qtys, lot_size):
-        """
-        Calculate the theoretical maximum expiry profit of the entered
-        multi-leg position from the actual entry premiums.
-
-        The calculation evaluates the option payoff at S=0 and at every
-        entered strike. For a fully hedged structure this gives the finite
-        maximum profit. If the entered combination has an unbounded upside
-        (for example a naked long call), the result is reported as 0 and the
-        staged profit-booking ladder is disabled for safety.
-        """
-        cfg = self.config
-        strike_keys = {
-            "BUY_CE": "buy_ce_strike",
-            "BUY_PE": "buy_pe_strike",
-            "SELL_CE": "sell_ce_strike",
-            "SELL_PE": "sell_pe_strike",
-        }
-
-        option_data = []
-        for leg in legs:
-            strike = cfg.get(strike_keys[leg])
-            if strike is None or leg not in entry_prices or leg not in qtys:
-                continue
-            lots = float(qtys[leg]) / float(lot_size)
-            option_type = "CE" if leg.endswith("CE") else "PE"
-            direction = LEG_DIRECTIONS[leg]
-            premium = float(entry_prices[leg])
-            option_data.append((option_type, float(strike), direction, premium, lots))
-
-        if not option_data:
-            return 0.0, 0.0
-
-        def expiry_profit(spot):
-            total = 0.0
-            for option_type, strike, direction, premium, lots in option_data:
-                if option_type == "CE":
-                    intrinsic = max(spot - strike, 0.0)
-                else:
-                    intrinsic = max(strike - spot, 0.0)
-
-                if direction == "BUY":
-                    pnl_per_unit = intrinsic - premium
-                else:
-                    pnl_per_unit = premium - intrinsic
-
-                total += pnl_per_unit * lots * lot_size
-            return total
-
-        # For a piecewise-linear option payoff, the finite maximum occurs at
-        # zero or one of the strikes. Check both sides of every strike too.
-        strikes = sorted({item[1] for item in option_data})
-        candidates = [0.0]
-        for strike in strikes:
-            candidates.extend([strike, max(0.0, strike - 1e-6), strike + 1e-6])
-
-        values = [expiry_profit(spot) for spot in candidates]
-        max_profit = max(values)
-
-        # Check the far-right slope. A positive net CE exposure makes maximum
-        # profit unbounded as spot -> infinity.
-        ce_slope = 0.0
-        for option_type, strike, direction, premium, lots in option_data:
-            if option_type == "CE":
-                ce_slope += (1.0 if direction == "BUY" else -1.0) * lots * lot_size
-
-        if ce_slope > 1e-9:
-            self._add_log(
-                "Maximum profit is unbounded for this leg combination; "
-                "50%/70%/100% profit exits are disabled.",
-                "ERROR"
-            )
-            return 0.0, 0.0
-
-        total_lots = sum(item[4] for item in option_data)
-        max_profit_per_lot = max_profit / total_lots if total_lots > 0 else 0.0
-        return max(0.0, max_profit), max(0.0, max_profit_per_lot)
-
-    @staticmethod
-    def _build_profit_exit_plan(qtys, lot_size):
-        """Return three tranche sizes, in lots, that sum exactly to the original lots."""
-        plan = []
-        for leg, qty in qtys.items():
-            total_lots = int(round(qty / lot_size))
-            if total_lots <= 0:
-                plan.append({"leg": leg, "lots": [0, 0, 0], "qty": [0, 0, 0]})
-                continue
-
-            # First two exits are approximately one-third each; the final
-            # tranche receives the remainder so no lot is left behind.
-            first = total_lots // 3
-            second = total_lots // 3
-            if total_lots > 0 and first == 0:
-                first = 1
-            if total_lots - first > 0 and second == 0:
-                second = 1
-            if first + second > total_lots:
-                second = max(0, total_lots - first)
-            third = total_lots - first - second
-
-            lots = [first, second, third]
-            plan.append({
-                "leg": leg,
-                "lots": lots,
-                "qty": [x * lot_size for x in lots],
-            })
-        return plan
-
-    def _partial_exit_all_legs(self, active_legs, legs, qtys, exit_txn, stage, lot_size):
-        """Exit one profit-booking tranche from every still-active leg."""
-        failed = []
-        realized = 0.0
-        plan_by_leg = {item["leg"]: item for item in self.profit_exit_plan}
-
-        for leg in list(active_legs):
-            tranche_qty = plan_by_leg.get(leg, {}).get("qty", [0, 0, 0])[stage]
-            tranche_qty = min(int(tranche_qty), int(qtys.get(leg, 0)))
-            if tranche_qty <= 0:
-                continue
-
-            symbol = legs[leg]["symbol"]
-            fill_price = self._exit_leg_partial(
-                symbol, tranche_qty, exit_txn[leg], retries=ORDER_RETRY_COUNT
-            )
-            if fill_price is False:
-                failed.append(symbol)
-                continue
-
-            entry = float(self.leg_info[leg]["entry_price"])
-            direction = LEG_DIRECTIONS[leg]
-            if direction == "BUY":
-                pnl = (float(fill_price) - entry) * tranche_qty
-            else:
-                pnl = (entry - float(fill_price)) * tranche_qty
-
-            realized += pnl
-            qtys[leg] -= tranche_qty
-            self.leg_info[leg]["qty"] = qtys[leg]
-
-            self._add_log(
-                f"EXIT {stage + 1}/3: {symbol} | Qty {tranche_qty} | "
-                f"Fill ₹{float(fill_price):.2f} | Realized P&L ₹{pnl:.2f}",
-                "EXIT"
-            )
-
-        self.realized_pnl += realized
-
-        if failed:
-            return False, failed
-
-        # Remove legs whose quantity has reached zero.
-        remaining = [leg for leg in active_legs if qtys.get(leg, 0) > 0]
-        return True, remaining
 
     def _run(self):
         cfg = self.config
@@ -997,46 +755,9 @@ class TradingBot:
             leg_exit_flags=leg_exit_flags,
         )
         self.active_legs = active_legs.copy()
-
-        # ---------------- Exit-strategy setup ----------------
-        self.profit_exit_stage = 0
-        self.profit_exit_plan = []
-        self.initial_sl = None
-        self.staged_base_sl = None
-        self.staged_profit_reference = 0.0
-
-        if self.exit_strategy_mode == "staged_profit":
-            # PDF mode is intentionally limited to the exact structure described
-            # in the PDF: one SELL CE + one SELL PE with the same total lot count.
-            self.max_profit_total, self.max_profit_per_lot = self._calculate_pdf_max_profit(
-                active_legs, entry_prices, qtys, lot_size
-            )
-            self.profit_exit_plan = self._build_profit_exit_plan(
-                {leg: qtys[leg] for leg in active_legs}, lot_size
-            )
-            self.initial_sl = self.max_profit_total * (self.desired_profit_pct / 100.0)
-            self.staged_base_sl = self.initial_sl
-            self.staged_profit_reference = 0.0
-            self.dynamic_max_loss = self.initial_sl
-            self.max_loss = self.initial_sl
-            self._add_log(
-                f"PDF staged mode: Max Profit ₹{self.max_profit_total:.2f}; "
-                f"Desired Profit {self.desired_profit_pct:.2f}%; "
-                f"Initial SL ₹{self.initial_sl:.2f}; "
-                f"Exits {self.profit_exit_thresholds[0]*100:.0f}% / "
-                f"{self.profit_exit_thresholds[1]*100:.0f}% / 100%."
-            )
-        else:
-            # Classic mode is unchanged: user-supplied Max Loss + optional
-            # Target Profit + optional stepped trailing SL.
-            self.max_profit_total = 0.0
-            self.max_profit_per_lot = 0.0
-            self.dynamic_max_loss = self.max_loss
-
         # ---------------- Monitor ----------------
         last_known_prices = dict(entry_prices)
 
-        peak_profit = 0.0
         self.dynamic_max_loss = self.max_loss
 
         while True:
@@ -1132,53 +853,33 @@ class TradingBot:
 
                 combined_loss = compute_combined_loss(entry_prices, current_prices, qtys)
                 total_pnl = -combined_loss + self.realized_pnl
-                current_profit = max(total_pnl, 0.0)
+                if (
+                    self.target_profit is not None
+                    and total_pnl >= self.target_profit
+                ):
+                    exit_reason = "TARGET PROFIT HIT"
+                current_profit = max(total_pnl, 0)
+                if self.trailing_stop_enabled:
 
-                if self.exit_strategy_mode == "staged_profit":
-                    # PDF rule: the running TSL moves ₹1 lower for every ₹1
-                    # increase in profit from the current post-exit reference.
-                    # It may become negative; a negative TSL means a locked-in profit.
-                    if self.staged_base_sl is not None:
-                        self.dynamic_max_loss = (
-                            self.staged_base_sl
-                            - max(0.0, current_profit - self.staged_profit_reference)
-                        )
+                    if current_profit > self.peak_profit:
 
-                    if self.max_profit_total > 0 and self.profit_exit_stage < 3:
-                        threshold = self.profit_exit_thresholds[self.profit_exit_stage]
-                        trigger_profit = self.max_profit_total * threshold
-                        if total_pnl >= trigger_profit:
-                            self._add_log(
-                                f"PROFIT EXIT {self.profit_exit_stage + 1}/3 TRIGGERED → "
-                                f"₹{total_pnl:.2f} >= ₹{trigger_profit:.2f} "
-                                f"({threshold * 100:.0f}% of max profit)",
-                                "TARGET"
-                            )
-                            exit_reason = (
-                                f"PROFIT EXIT {self.profit_exit_stage + 1}/3 "
-                                f"({threshold * 100:.0f}% MAX PROFIT)"
-                            )
-                else:
-                    # OLD / CLASSIC MODE — preserve the existing behaviour.
-                    if (
-                        self.target_profit is not None
-                        and total_pnl >= self.target_profit
-                    ):
-                        exit_reason = "TARGET PROFIT HIT"
+                        self.peak_profit = current_profit
+                        profit_since_reset = self.peak_profit - self.trailing_start_profit
+                        steps = int(profit_since_reset // 100)
 
-                    if self.trailing_stop_enabled and current_profit > peak_profit:
-                        peak_profit = current_profit
-                        steps = int(peak_profit // 100)
                         new_dynamic = max(
                             0,
                             self.initial_max_loss - (steps * self.trail_amount)
                         )
+
                         if new_dynamic != self.dynamic_max_loss:
                             self.dynamic_max_loss = new_dynamic
                             self._add_log(
                                 f"Trailing SL Updated → ₹{self.dynamic_max_loss:.0f}"
                             )
-
+                            print(
+                                f"Trailing SL Updated: ₹{self.dynamic_max_loss:.0f}"
+                            )
                 # Optional, opt-in per-leg checks. With no per_leg_stop_loss /
                 # per_leg_target configured these never fire, so the original
                 # "combined loss threshold or manual stop only" behaviour is
@@ -1195,7 +896,6 @@ class TradingBot:
                 self._set(current_prices=current_prices,
                            combined_loss=combined_loss,
                            total_pnl=total_pnl,
-                           max_loss=self.dynamic_max_loss,
                             leg_exit_flags=dict(leg_exit_flags),
                             error_message=None,)
 
@@ -1214,147 +914,6 @@ class TradingBot:
                         )
 
             if exit_reason:
-                # Profit ladder exits only one-third of each active leg at a
-                # time. Loss/manual/EOD exits still close everything.
-                is_profit_exit = exit_reason.startswith("PROFIT EXIT ")
-
-                if is_profit_exit:
-                    stage = self.profit_exit_stage
-                    running_sl_before_exit = self.dynamic_max_loss
-                    profit_reference_before_exit = total_pnl
-
-                    # The PDF rebases TSL using the calculated "partial profit
-                    # booked" from its profit table, not the live fill slippage.
-                    # For Exit 1/2 this is: max profit × exit % × booked lots / total lots.
-                    pdf_partial_profit = 0.0
-                    if self.exit_strategy_mode == "staged_profit" and self.max_profit_total > 0:
-                        threshold = self.profit_exit_thresholds[stage]
-                        plan_by_leg = {item["leg"]: item for item in self.profit_exit_plan}
-                        # In the PDF, Total Lots is the strategy lot count
-                        # (not CE-lots + PE-lots). Both legs carry that same lot count.
-                        total_original_lots = int(round(
-                            self.qtys.get("SELL_CE", self.qtys.get("SELL_PE", 0)) / lot_size
-                        ))
-                        booked_lots = int(round(
-                            plan_by_leg.get("SELL_CE", plan_by_leg.get("SELL_PE", {}))
-                            .get("qty", [0, 0, 0])[stage] / lot_size
-                        ))
-                        if total_original_lots > 0:
-                            pdf_partial_profit = (
-                                self.max_profit_total
-                                * threshold
-                                * booked_lots
-                                / total_original_lots
-                            )
-
-                    realized_before_exit = self.realized_pnl
-                    success, failed_legs = self._partial_exit_all_legs(
-                        active_legs, legs, qtys, exit_txn, stage, lot_size
-                    )
-
-                    if not success:
-                        message = f"Failed partial exit legs: {failed_legs}"
-                        self._set(
-                            status="error",
-                            exit_reason=exit_reason,
-                            total_pnl=total_pnl,
-                            error_message=message,
-                            ended_at=datetime.now(IST).isoformat()
-                        )
-                        self._add_log(message, "ERROR")
-                        return
-
-                    tranche_realized_profit = self.realized_pnl - realized_before_exit
-
-                    if self.exit_strategy_mode == "staged_profit":
-                        # PDF step 5/7/10: subtract the PDF-calculated partial
-                        # profit booked from the TSL that existed immediately before
-                        # the exit, then use that value as the new base TSL.
-                        self.staged_base_sl = (
-                            float(running_sl_before_exit) - float(pdf_partial_profit)
-                        )
-                        self.staged_profit_reference = max(0.0, float(profit_reference_before_exit))
-                        self.dynamic_max_loss = self.staged_base_sl
-                        self._add_log(
-                            f"Modified TSL after Exit {stage + 1}: "
-                            f"₹{self.staged_base_sl:.2f} "
-                            f"(pre-exit TSL ₹{running_sl_before_exit:.2f} "
-                            f"− PDF partial profit ₹{pdf_partial_profit:.2f}; "
-                            f"actual realized ₹{tranche_realized_profit:.2f})"
-                        )
-
-                    self.profit_exit_stage += 1
-                    symbols_after_tranche = [legs[leg]["symbol"] for leg in active_legs]
-                    active_legs = [leg for leg in active_legs if qtys.get(leg, 0) > 0]
-                    self.active_legs = active_legs.copy()
-
-                    if not active_legs or self.profit_exit_stage >= 3:
-                        # Stage 3 closes the remaining quantity.
-                        final_symbols = symbols_after_tranche
-                        # PDF step 12: wait approximately one minute after the
-                        # final tranche, then verify. If anything is still open,
-                        # immediately square it off.
-                        positions_closed = True
-                        if final_symbols and self.exit_strategy_mode == "staged_profit":
-                            time.sleep(60)
-                            positions_closed = self._verify_all_positions_closed(symbols=final_symbols)
-                            if not positions_closed:
-                                self._add_log(
-                                    "Positions still open after final profit exit; "
-                                    "initiating immediate square-off.",
-                                    "ERROR"
-                                )
-                                self._force_square_off_open_positions(final_symbols)
-                                time.sleep(POSITION_VERIFY_DELAY)
-                                positions_closed = self._verify_all_positions_closed(symbols=final_symbols)
-                        elif final_symbols:
-                            for attempt in range(1, POSITION_VERIFY_RETRIES + 1):
-                                time.sleep(POSITION_VERIFY_DELAY)
-                                positions_closed = self._verify_all_positions_closed(symbols=final_symbols)
-                                if positions_closed:
-                                    break
-
-                        if not positions_closed:
-                            warning = (
-                                "Profit exit orders completed, but Zerodha's position "
-                                "feed had not caught up by the last check."
-                            )
-                            self._set(
-                                status="exited",
-                                exit_reason=exit_reason,
-                                total_pnl=self.realized_pnl,
-                                error_message=warning,
-                                ended_at=datetime.now(IST).isoformat()
-                            )
-                            self._add_log(warning, "ERROR")
-                            self.active_legs = []
-                            return
-
-                        self._set(
-                            status="exited",
-                            exit_reason=exit_reason,
-                            total_pnl=self.realized_pnl,
-                            ended_at=datetime.now(IST).isoformat()
-                        )
-                        self._add_log(
-                            f"All profit tranches completed. Realized P&L = ₹{self.realized_pnl:.2f}",
-                            "EXIT"
-                        )
-                        self.active_legs = []
-                        return
-
-                    # Do not exit the remaining legs yet. Continue monitoring
-                    # until the next 75% / 100% threshold is reached.
-                    self._set(
-                        status="monitoring",
-                        qtys=dict(qtys),
-                        active_legs=active_legs,
-                        total_pnl=total_pnl,
-                        error_message=None
-                    )
-                    continue
-
-                # ---------------- Full exit: SL / manual / EOD ----------------
                 failed_legs = []
                 exit_symbols = []
                 self._add_log(
@@ -1381,7 +940,7 @@ class TradingBot:
                     entry_prices,
                     last_known_prices,
                     qtys
-                ) + self.realized_pnl)
+                )+self.realized_pnl)
 
                 if failed_legs:
                     message = f"Failed exit legs: {failed_legs}"

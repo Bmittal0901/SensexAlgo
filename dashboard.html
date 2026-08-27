@@ -260,25 +260,6 @@
       .strike-grid { gap:8px; }
       .strike-grid input { padding:9px 8px; font-size:12px; }
     }
-
-    .mode-card { width:100%; max-width:620px; background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:36px; position:relative; overflow:hidden; }
-    .mode-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-    .mode-option { background:var(--surface2); border:1px solid var(--border); border-radius:14px; padding:22px; cursor:pointer; transition:all .2s; }
-    .mode-option:hover { border-color:var(--accent); transform:translateY(-1px); }
-    .mode-option h3 { font-family:var(--mono); font-size:13px; color:var(--text); margin-bottom:9px; letter-spacing:1px; }
-    .mode-option p { font-size:12px; line-height:1.6; color:var(--muted); }
-    .mode-option .mode-tag { display:inline-block; margin-bottom:12px; padding:4px 8px; border-radius:5px; font-family:var(--mono); font-size:9px; letter-spacing:1px; color:var(--accent); border:1px solid rgba(0,212,255,.25); }
-    .profit-table { width:100%; border-collapse:separate; border-spacing:0; margin:8px 0 18px; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-    .profit-table th,.profit-table td { padding:9px 8px; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:10px; text-align:center; }
-    .profit-table th { color:var(--muted); font-weight:500; background:var(--surface2); }
-    .profit-table td { color:var(--text); }
-    .profit-table tr:last-child td { border-bottom:none; }
-    .staged-summary { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0 18px; }
-    .summary-box { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:11px; text-align:center; }
-    .summary-box .s-label { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
-    .summary-box .s-value { margin-top:5px; font-family:var(--mono); font-size:14px; color:var(--text); }
-    .mode-back { margin-top:12px; background:transparent; border:1px solid var(--border2); color:var(--muted); padding:10px 14px; border-radius:9px; font-family:var(--mono); font-size:10px; cursor:pointer; }
-    @media(max-width:700px){ .mode-grid{grid-template-columns:1fr;} .mode-card{padding:24px;} }
   </style>
 </head>
 <body>
@@ -302,41 +283,12 @@
       </div>
       <div class="login-step">
         <div class="step-num">3</div>
-        <div class="step-text">You'll be <strong>automatically redirected</strong> back to choose your algo</div>
+        <div class="step-text">You'll be <strong>automatically redirected</strong> back to start the algo</div>
       </div>
     </div>
     <div class="error-msg" id="loginError"></div>
     <button class="login-btn" onclick="loginWithZerodha()">LOGIN WITH ZERODHA</button>
     <div class="login-note">Your credentials are entered directly on Zerodha's secure website.<br>We never see your password.</div>
-  </div>
-</div>
-
-<!-- SCREEN 4 — ALGORITHM SELECTION -->
-<div id="screen4" class="screen center-wrap">
-  <div class="mode-card">
-    <div class="brand">
-      <div class="brand-tag">Multi-Leg Options Algo</div>
-      <div class="brand-title">Select Algorithm</div>
-      <div class="brand-sub">Choose the exit strategy for this session</div>
-    </div>
-    <div class="user-chip">
-      <div class="user-dot"></div>
-      <div class="user-name" id="modeUserName">Connected</div>
-      <div class="user-sub">Zerodha ✓</div>
-    </div>
-    <div class="mode-grid">
-      <div class="mode-option" onclick="selectAlgoMode('legacy')">
-        <span class="mode-tag">ORIGINAL</span>
-        <h3>COMBINED-LOSS ALGO</h3>
-        <p>Keep the existing algorithm unchanged. You enter the combined maximum-loss threshold and the existing optional trailing/target controls remain available.</p>
-      </div>
-      <div class="mode-option" onclick="selectAlgoMode('staged')">
-        <span class="mode-tag">ALTERNATE</span>
-        <h3>PROFIT-TABLE EXIT</h3>
-        <p>Calculate maximum profit from actual entry premiums, build a 3-stage profit table, calculate desired profit and initial SL automatically, then trail/rebase as profits are booked.</p>
-      </div>
-    </div>
-    <div class="error-msg" id="modeError"></div>
   </div>
 </div>
 
@@ -463,52 +415,6 @@
       // Set default value when the page loads
       updateLotSize();
     </script>
-  </div>
-</div>
-
-<!-- SCREEN 5 — STAGED PROFIT-TABLE SETUP -->
-<div id="screen5" class="screen center-wrap">
-  <div class="card">
-    <div class="brand">
-      <div class="brand-tag">Profit-Table Exit</div>
-      <div class="brand-sub">3-Stage · Auto Max Profit · Rebasing TSL</div>
-    </div>
-    <div class="user-chip"><div class="user-dot"></div><div class="user-name" id="stagedUserName">Connected</div><div class="user-sub">Zerodha ✓</div></div>
-    <div class="section-label">Contract Setup</div>
-    <div class="form-grid">
-      <div class="form-group"><label>Index</label><select id="staged_index"><option value="SENSEX" selected>SENSEX</option><option value="NIFTY">NIFTY</option></select></div>
-      <div class="form-group"><label>Expiry</label><input type="date" id="staged_expiry"/></div>
-    </div>
-    <div class="form-grid">
-      <div class="form-group"><label>Lot Size</label><input type="number" id="staged_lot_size" readonly/></div>
-      <div class="form-group"><label>Total Lots per Leg</label><input type="number" id="staged_total_lots" min="1" value="6"/></div>
-    </div>
-    <div class="section-label">Option Legs</div>
-    <div class="strike-grid">
-      <div class="form-group"><label>Sell PE Strike</label><input type="number" id="staged_sell_pe_strike" placeholder="e.g. 82000"/><div class="premium-hint" id="staged_sell_pe_premium"></div></div>
-      <div class="form-group"><label>Sell CE Strike</label><input type="number" id="staged_sell_ce_strike" placeholder="e.g. 83000"/><div class="premium-hint" id="staged_sell_ce_premium"></div></div>
-    </div>
-    <div class="strike-grid">
-      <div class="form-group"><label>Buy PE Strike <span style="font-size:9px">(optional)</span></label><input type="number" id="staged_buy_pe_strike" placeholder="Optional"/><div class="premium-hint" id="staged_buy_pe_premium"></div></div>
-      <div class="form-group"><label>Buy CE Strike <span style="font-size:9px">(optional)</span></label><input type="number" id="staged_buy_ce_strike" placeholder="Optional"/><div class="premium-hint" id="staged_buy_ce_premium"></div></div>
-    </div>
-    <div class="section-label">Profit Table</div>
-    <table class="profit-table">
-      <thead><tr><th>EXIT</th><th>% OF MAX PROFIT</th><th>LOTS</th><th>CALCULATED PROFIT</th></tr></thead>
-      <tbody>
-        <tr><td>1</td><td><input type="number" id="exit1_pct" value="50" min="1" max="100" step="1" style="width:70px"/>%</td><td><input type="number" id="exit1_lots" value="2" min="0" step="1" style="width:70px"/></td><td id="exit1_profit">--</td></tr>
-        <tr><td>2</td><td><input type="number" id="exit2_pct" value="75" min="1" max="100" step="1" style="width:70px"/>%</td><td><input type="number" id="exit2_lots" value="2" min="0" step="1" style="width:70px"/></td><td id="exit2_profit">--</td></tr>
-        <tr><td>3</td><td><input type="number" id="exit3_pct" value="100" min="1" max="100" step="1" style="width:70px"/>%</td><td><input type="number" id="exit3_lots" value="2" min="0" step="1" style="width:70px"/></td><td id="exit3_profit">--</td></tr>
-      </tbody>
-    </table>
-    <div class="staged-summary">
-      <div class="summary-box"><div class="s-label">Max Profit</div><div class="s-value" id="stagedMaxProfit">Calculated after entry</div></div>
-      <div class="summary-box"><div class="s-label">Desired Profit / Initial SL</div><div class="s-value" id="stagedDesiredProfit">Calculated after entry</div></div>
-    </div>
-    <div class="toggle-row" onclick="toggleDryRun()"><div class="toggle-info"><div class="t-label">Dry Run Mode</div><div class="t-sub" id="dryRunSub5">ON — No real orders will be placed</div></div><div class="toggle-switch on" id="dryRunToggle5"></div></div>
-    <div class="error-msg" id="stagedSetupError"></div>
-    <button class="btn-primary" id="stagedSetupBtn" onclick="handleStagedSetup()">LAUNCH STAGED ALGO</button>
-    <button class="mode-back" onclick="goToScreen(4)">← BACK TO ALGORITHM SELECTION</button>
   </div>
 </div>
 
@@ -715,8 +621,6 @@
           return;
         }
         document.getElementById("userName").textContent = authData.user_name || "Connected";
-        document.getElementById("modeUserName").textContent = authData.user_name || "Connected";
-        document.getElementById("stagedUserName").textContent = authData.user_name || "Connected";
 
         const statusRes  = await fetch(`${API}/status`);
         const statusData = await statusRes.json();
@@ -725,7 +629,7 @@
           goToScreen(3);
           startPolling();
         } else {
-          goToScreen(4);
+          goToScreen(2);
         }
         return;
       } catch(e) {
@@ -764,61 +668,18 @@
     goToScreen(1);
   }
 
-  let selectedAlgoMode = "legacy";
-
-  function selectAlgoMode(mode) {
-    selectedAlgoMode = mode;
-    if (mode === "legacy") {
-      goToScreen(2);
-    } else {
-      goToScreen(5);
-      updateStagedLotSize();
-      updateStagedProfitPreview();
-    }
-  }
-
-  function updateStagedLotSize() {
-    const index = document.getElementById("staged_index").value;
-    document.getElementById("staged_lot_size").value = index === "SENSEX" ? 20 : 65;
-  }
-
-  function updateStagedProfitPreview() {
-    // Preview only. Actual max profit is calculated from actual entry fills by the bot.
-    const totalLots = Number(document.getElementById("staged_total_lots").value) || 0;
-    const pcts = [1,2,3].map(i => Number(document.getElementById(`exit${i}_pct`).value) / 100);
-    const lots = [1,2,3].map(i => Number(document.getElementById(`exit${i}_lots`).value) || 0);
-    const note = totalLots > 0 && lots.reduce((a,b)=>a+b,0) === totalLots ? "Ready — calculated after entry" : "Exit lots must equal total lots";
-    [1,2,3].forEach(i => document.getElementById(`exit${i}_profit`).textContent = note);
-    document.getElementById("stagedMaxProfit").textContent = "Calculated after entry";
-    document.getElementById("stagedDesiredProfit").textContent = "Calculated after entry";
-  }
-
-  function setupStagedPreviewListeners() {
-    ["staged_index","staged_total_lots","exit1_pct","exit2_pct","exit3_pct","exit1_lots","exit2_lots","exit3_lots"].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener("input", updateStagedProfitPreview);
-    });
-    document.getElementById("staged_index").addEventListener("change", updateStagedLotSize);
-  }
-
   // Dry run toggle
   function toggleDryRun() {
     dryRun = !dryRun;
     const toggle = document.getElementById("dryRunToggle");
-    const toggle5 = document.getElementById("dryRunToggle5");
     const sub    = document.getElementById("dryRunSub");
-    const sub5   = document.getElementById("dryRunSub5");
     if (dryRun) {
       toggle.classList.add("on");
-      if (toggle5) toggle5.classList.add("on");
       sub.textContent = "ON — No real orders will be placed";
-      if (sub5) sub5.textContent = "ON — No real orders will be placed";
       sub.classList.remove("live");
     } else {
       toggle.classList.remove("on");
-      if (toggle5) toggle5.classList.remove("on");
       sub.textContent = "OFF — REAL orders will be placed!";
-      if (sub5) sub5.textContent = "OFF — REAL orders will be placed!";
       sub.classList.add("live");
     }
   }
@@ -852,63 +713,7 @@
                   ? "ON"
                   : "OFF";
   }
-      async function handleStagedSetup() {
-    const btn = document.getElementById("stagedSetupBtn");
-    const err = document.getElementById("stagedSetupError");
-    err.textContent = "";
-
-    const totalLots = Number(document.getElementById("staged_total_lots").value) || 0;
-    const lots = [1,2,3].map(i => Number(document.getElementById(`exit${i}_lots`).value) || 0);
-    const pcts = [1,2,3].map(i => Number(document.getElementById(`exit${i}_pct`).value) / 100);
-    const buyCE = document.getElementById("staged_buy_ce_strike").value;
-    const buyPE = document.getElementById("staged_buy_pe_strike").value;
-    const sellCE = document.getElementById("staged_sell_ce_strike").value;
-    const sellPE = document.getElementById("staged_sell_pe_strike").value;
-
-    if (!document.getElementById("staged_expiry").value) return void(err.textContent = "Expiry date is required.");
-    if (!sellCE && !sellPE && !buyCE && !buyPE) return void(err.textContent = "Enter at least one option strike.");
-    if (totalLots <= 0) return void(err.textContent = "Total lots must be positive.");
-    if (lots.reduce((a,b)=>a+b,0) !== totalLots) return void(err.textContent = "Exit 1 + Exit 2 + Exit 3 lots must equal Total Lots per Leg.");
-    if (!(pcts[0] < pcts[1] && pcts[1] <= pcts[2])) return void(err.textContent = "Exit percentages must increase (for example 50%, 75%, 100%).");
-
-    const config = {
-      algo_mode: "staged",
-      index: document.getElementById("staged_index").value,
-      expiry: document.getElementById("staged_expiry").value,
-      buy_ce_strike: buyCE ? parseInt(buyCE) : null,
-      buy_pe_strike: buyPE ? parseInt(buyPE) : null,
-      sell_ce_strike: sellCE ? parseInt(sellCE) : null,
-      sell_pe_strike: sellPE ? parseInt(sellPE) : null,
-      buy_ce_lots: buyCE ? totalLots : 0,
-      buy_pe_lots: buyPE ? totalLots : 0,
-      sell_ce_lots: sellCE ? totalLots : 0,
-      sell_pe_lots: sellPE ? totalLots : 0,
-      max_loss: null,
-      target_profit: null,
-      trailing_stop_enabled: false,
-      trail_amount: 1,
-      exit1_pct: pcts[0], exit2_pct: pcts[1], exit3_pct: pcts[2],
-      exit1_lots: lots[0], exit2_lots: lots[1], exit3_lots: lots[2],
-      dry_run: dryRun
-    };
-
-    if (!dryRun && !confirm("⚠️ LIVE MODE: Real orders will be placed on Zerodha. Are you sure?")) return;
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>STARTING...';
-    try {
-      lastConfig = config;
-      const res = await fetch(`${API}/start`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(config)});
-      const data = await res.json();
-      if (res.ok) {
-        document.getElementById("dryBadge").classList.toggle("on", dryRun);
-        stopping = false; goToScreen(3); startPolling();
-      } else {
-        err.textContent = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
-      }
-    } catch(e) { err.textContent = "Cannot connect to server."; }
-    finally { btn.disabled = false; btn.innerHTML = "LAUNCH STAGED ALGO"; }
-  }
-
-  // Start algo
+      // Start algo
   async function handleSetup() {
     const btn = document.getElementById("setupBtn");
     const err = document.getElementById("setupError");
@@ -1194,12 +999,6 @@ else {
         data.max_loss != null
             ? "₹" + Number(data.max_loss).toLocaleString("en-IN")
             : "--";
-
-    // The original mode keeps its editable risk controls. Staged mode owns
-    // the SL/desired-profit calculation from the profit table, so those
-    // manual controls are hidden while it is running.
-    document.querySelector(".risk-row").style.display = data.algo_mode === "staged" ? "none" : "flex";
-    document.getElementById("riskUpdateMsg").style.display = data.algo_mode === "staged" ? "none" : document.getElementById("riskUpdateMsg").style.display;
     
     const liveMaxLoss = document.getElementById("liveMaxLoss");
     const liveTarget = document.getElementById("liveTarget");
@@ -1226,11 +1025,9 @@ else {
     }
 
     document.getElementById("targetProfitVal").textContent =
-    data.algo_mode === "staged" && data.desired_profit != null
-        ? "₹" + Number(data.desired_profit).toLocaleString("en-IN")
-        : (data.target_profit != null
-            ? "₹" + Number(data.target_profit).toLocaleString("en-IN")
-            : "--");
+    data.target_profit != null
+        ? "₹" + Number(data.target_profit).toLocaleString("en-IN")
+        : "--";
 
     // snapshot() keeps legs/qtys/entry_prices/current_prices as separate
     ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"].forEach(leg => {
@@ -1379,7 +1176,6 @@ else {
 
   });
 
-  setupStagedPreviewListeners();
   init();
 </script>
 </body>
