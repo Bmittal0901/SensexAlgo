@@ -62,7 +62,10 @@ def should_exit(combined_loss, max_loss):
     Returns:
         True if combined_loss >= max_loss
     """
-    return combined_loss >= max_loss
+    if max_loss >= 0:
+        return combined_loss >= max_loss
+
+    return combined_loss <= max_loss
 
 
 # ---------------- Optional per-leg SL / target ----------------
