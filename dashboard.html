@@ -1141,13 +1141,56 @@ else {
         + `&option_type=${field.type}`;
 
       fetch(url)
-        .then(res => res.ok ? res.json() : res.json().then(d => { throw new Error(d.detail || "Not found"); }))
-        .then(data => {
-          hint.textContent = "Premium: ₹" + Number(data.ltp).toLocaleString("en-IN", {minimumFractionDigits: 2});
-          hint.className = "premium-hint loaded";
+        .then(async res => {
+
+          if (res.status === 401) {
+
+            const data = await res.json();
+
+            alert(
+              data.detail ||
+              "Your Zerodha session has expired. Please log in again."
+            );
+
+            goToScreen(1);
+
+            throw new Error("Session expired");
+          }
+
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || "Not found");
+          }
+
+          return res.json();
         })
+
+        .then(data => {
+
+          hint.textContent =
+            "Premium: ₹" +
+            Number(data.ltp).toLocaleString(
+              "en-IN",
+              {
+                minimumFractionDigits: 2
+              }
+            );
+
+          hint.className = "premium-hint loaded";
+
+        })
+
         .catch(err => {
-          hint.textContent = typeof err.message === "string" ? err.message : "Could not fetch premium";
+
+          if (err.message === "Session expired") {
+            return;
+          }
+
+          hint.textContent =
+            typeof err.message === "string"
+              ? err.message
+              : "Could not fetch premium";
+
           hint.className = "premium-hint err";
         });
     }
