@@ -121,6 +121,7 @@
 
     .logout-btn { background:transparent; border:1px solid var(--muted); color:var(--muted); padding:6px 14px; border-radius:8px; font-family:var(--mono); font-size:10px; letter-spacing:1px; cursor:pointer; transition:all 0.2s; }
     .logout-btn:hover { border-color:var(--red); color:var(--red); }
+    .setup-logout-btn { margin-left: 12px; flex-shrink: 0;}
 
     .dry-badge { font-family:var(--mono); font-size:10px; letter-spacing:1px; padding:4px 10px; border-radius:4px; background:rgba(255,193,7,0.12); color:var(--yellow); border:1px solid rgba(255,193,7,0.25); display:none; }
     .dry-badge.on { display:block; }
@@ -303,6 +304,9 @@
       <div class="user-dot"></div>
       <div class="user-name" id="userName">Connected</div>
       <div class="user-sub">Zerodha ✓</div>
+      <button class="logout-btn setup-logout-btn" onclick="logout()">
+        LOGOUT
+      </button>
     </div>
     <div class="section-label">Contract Setup</div>
     <div class="form-grid" style="margin-bottom:20px">

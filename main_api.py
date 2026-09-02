@@ -63,10 +63,6 @@ def _get_authed_kite() -> KiteConnect:
     kite.set_access_token(_access_token)
     return kite
 
-def _clear_session():
-    global _access_token, _user_name
-    _access_token = None
-    _user_name = None
 
 @app.get("/")
 def dashboard():
@@ -113,27 +109,8 @@ def quote(index: str, expiry: str, strike: int, option_type: str):
     try:
         ltp_data = kite.ltp(key)
         ltp = ltp_data[key]["last_price"]
-
     except Exception as e:
-        error_message = str(e).lower()
-
-        if (
-            "access_token" in error_message
-            or "api_key" in error_message
-            or "token" in error_message
-            or "session" in error_message
-        ):
-            _clear_session()
-
-            raise HTTPException(
-                status_code=401,
-                detail="Zerodha session expired. Please log in again."
-            )
-
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not fetch LTP: {e}"
-        )
+        raise HTTPException(502, f"Could not fetch LTP: {e}")
 
     return {"symbol": symbol, "ltp": ltp}
 
@@ -176,32 +153,9 @@ def zerodha_callback(request_token: str, status: Optional[str] = None,
 
 @app.get("/api/auth-status")
 def auth_status():
-    global _access_token, _user_name
-
     if not _access_token:
         return {"logged_in": False}
-
-    try:
-        kite = KiteConnect(api_key=API_KEY)
-        kite.set_access_token(_access_token)
-
-        profile = kite.profile()
-
-        _user_name = profile.get("user_name")
-
-        return {
-            "logged_in": True,
-            "user_name": _user_name
-        }
-
-    except Exception:
-        # Token has expired or is invalid
-        _clear_session()
-
-        return {
-            "logged_in": False,
-            "reason": "Zerodha session expired. Please log in again."
-        }
+    return {"logged_in": True, "user_name": _user_name}
 
 
 @app.post("/api/logout")
