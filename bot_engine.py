@@ -867,10 +867,8 @@ class TradingBot:
                         profit_since_reset = self.peak_profit - self.trailing_start_profit
                         steps = int(profit_since_reset // 100)
 
-                        new_dynamic = max(
-                            0,
-                            self.initial_max_loss - (steps * self.trail_amount)
-                        )
+                        new_dynamic = self.initial_max_loss - (steps * self.trail_amount)
+    
 
                         if new_dynamic != self.dynamic_max_loss:
                             self.dynamic_max_loss = new_dynamic
